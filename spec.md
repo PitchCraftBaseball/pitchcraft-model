@@ -2,7 +2,7 @@
 
 Revision 1
 
-We're likely going to be changing input a lot. Given the proposed data access pattern from the **ML Architecture Diagram** 
+We're likely going to be changing input a lot. Given the proposed data access pattern from the [Model V2 Diagram](<Model V2.drawio.pdf>)
 
 # Spec 
 
