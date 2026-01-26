@@ -1,6 +1,6 @@
 # Overview
 
-Revision 1
+Revision 1.1
 
 We're likely going to be changing input a lot. Given the proposed data access pattern from the [Model V2 Diagram](<Model V2.drawio.pdf>)
 
@@ -11,11 +11,18 @@ We want this to be as API friendly as possible. The primary motivating factor is
 ## Request Body 1: Data retrieval request
 ```json
 { 
-    batter: string
-    pitcher: string
-    features: [string...]
+    batter: string,
+    pitcher: string,
+    state_features: {
+        string...: any,
+        ...
+    }
+    batter_features: [string...], 
+    pitcher_features: [string...]
 }
 ```
+Updated to reflect that features can take on values. This is important for state updates that happen in real time. Also, we may want to support looking for different features for both types of players. Failed to realize that during the first pass. 
+
 For the sake of developer convenience, available features should be accessible through an API exposed from the Data Retrieval service that returns a list of `features`. The data retrieval service will guarantee that all the elements in the `features` JSON array are valid. We can set up a configuration file that matches our database columns.
 
 ### Response
