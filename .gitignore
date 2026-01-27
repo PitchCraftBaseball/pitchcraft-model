@@ -2,3 +2,5 @@
 __pycache__/
 venv/
 *~
+*/rnn_data.csv
+*/vocab/rnn*

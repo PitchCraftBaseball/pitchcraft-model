@@ -19,6 +19,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.data.db import find_table_for_column, get_read_cursor
 
+# TODO: MOVE THESE GLOBALS TO A CONFIG FILE? 
+RNN_VERSION = "v0_1"
+
 # TODO: add controller error messaging that simply errors if the player ID is invalid
 
 class SimplePitchRNN(nn.Module):
@@ -94,6 +97,11 @@ def _latest_vocab_csv(vocab_dir: Path) -> Path:
         raise RuntimeError("No vocab files found in vocab/. Run the notebook to generate rnn_vocab_YYYYMMDD.csv.")
     return vocab_files[-1]
 
+def _latest_parameters(trained_parameters_dir: Path) -> Path: 
+    parameters_files = sorted(trained_parameters_dir.glob(f"simple_rnn_{RNN_VERSION}_*.pt"))
+    if not parameters_files:
+        raise RuntimeError("No trained parameters found. Run training once and commit parameters file.")
+    return parameters_files[-1]
 
 def _load_vocabs_from_csv(vocab_path: Path) -> tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
     # Load categorical and target vocabularies from the exported CSV.
@@ -213,7 +221,7 @@ def _fetch_player_features(
         row = cursor.fetchone()
         features[feature] = row[0] if row else None
     # Debug: write out retrieved feature values to a dated log file.
-    debug_dir = Path("player_feature_retrieval_debug")
+    debug_dir = Path("player-feature-retrieval-debug")
     debug_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d")
     debug_path = debug_dir / f"player_features_{entity}_{stamp}.log"
@@ -233,9 +241,8 @@ def _build_pitch_state_from_features(
     pitcher_features: Dict[str, Optional[str]],
 ) -> PitchState:
     # Boilerplate mapper from retrieved features into the PitchState schema.
-    # TODO: Map your feature names to the PitchState fields and numeric inputs.
+    # TODO: Map feature names to the PitchState fields and numeric inputs.
     merged: Dict[str, Any] = {}
-    # ! this commented out bit below shouldn't happen anymore
     merged.update(state_features)
     merged.update(batter_features)
     merged.update(pitcher_features)
@@ -250,7 +257,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Pitch RNN Inference API")
 
     artifacts_path = Path("model_config.json")
-    model_path = Path("simple_pitch_rnn_best.pt")
+    model_dir = Path(Path.cwd() / "model-training-notebooks" / "trained-parameters")
+    model_path = _latest_parameters(model_dir)
 
     if not artifacts_path.exists():
         raise RuntimeError("Missing model_config.json. Provide feature spec + vocabs before starting the API.")

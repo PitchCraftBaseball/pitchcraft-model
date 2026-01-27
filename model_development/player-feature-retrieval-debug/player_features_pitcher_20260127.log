@@ -1,0 +1,4 @@
+player_ID=642121
+requested_features=['p_throws']
+retrieved_features={'p_throws': 'R'}
+---

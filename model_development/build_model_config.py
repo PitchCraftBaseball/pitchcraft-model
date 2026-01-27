@@ -4,7 +4,16 @@ import json
 from pathlib import Path
 from typing import Dict, List
 
+"""
+This file is responsible for generating model_config.json in the format expected by the API when it loads the model parameters. 
+- `cat_cols` are categorical features 
+- `num_cols` are numerical features
+- `bool_cols` are boolean features. 
+    - ! NOTE we aren't actually taking advantage of boolean columns at this point because the booleans come out as 1s and 0s from the database. We can refactor it out
+"""
 
+# ! If you update the training notebooks, you need to update the features here.
+# * Add features to this feature spec. 
 FEATURE_SPEC = {
     "target": "y_next_pitch_type",
     "cat_cols": [
@@ -29,6 +38,7 @@ FEATURE_SPEC = {
     "bool_cols": [],
 }
 
+# ! If you update the training notebooks, you need to update the hyperparameters from here.
 PAD_ID = 0
 MAX_LEN = 8
 EMB_DIM = 16
