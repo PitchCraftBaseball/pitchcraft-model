@@ -23,6 +23,8 @@ from src.data.db import find_table_for_column, get_read_cursor
 RNN_VERSION = "v0_1"
 
 # TODO: add controller error messaging that simply errors if the player ID is invalid
+# TODO: break these out into individual modules? 
+# code doesnt seem that bad to look at right now
 
 class SimplePitchRNN(nn.Module):
     def __init__(
