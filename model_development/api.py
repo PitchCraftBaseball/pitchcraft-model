@@ -58,12 +58,13 @@ class SimplePitchRNN(nn.Module):
         h, _ = self.rnn(x)
         return self.fc(h)
 
-# TODO: either get this code generated and move it to a different file for validation, or discuss another approach
+# TODO: either get this code generated and move it to a different file for validation, or discuss another approach\
+# todo: consider creating field exclusion set that allows fields that are only used for inference 
 class PitchState(BaseModel):
     pitcher: Optional[str] = None
     batter: Optional[str] = None
     stand: Optional[str] = None
-    p_throws: Optional[str] = None # todo: discuss this field as a feature in general. the field comes from historical pitches, which is one to many rows 
+    p_throws: Optional[str] = None  
     inning_topbot: Optional[str] = None
     count_state: Optional[str] = None
     prev_pitch_type: Optional[str] = None
