@@ -48,3 +48,7 @@ with get_read_cursor() as cursor:
     result = cursor.fetchone()
     print(result)
 ```
+
+# Notes
+1) `psycog2` WILL NOT BUILD WITH ANY VERSION OF PYTHON>=3.11 
+2) `bruno-templates` work with [bruno](https://www.usebruno.com/) which is a nifty offline Postman clone that lets us easily share request templates through Git. 
