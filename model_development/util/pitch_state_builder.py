@@ -6,20 +6,6 @@ from typing import Any, Dict, List, Optional
 class StaticPitchState(BaseModel):
     pitcher: int
     batter: int
-    # stand: Optional[str] = None
-    # p_throws: Optional[str] = None  
-    # inning_topbot: Optional[str] = None
-    # count_state: Optional[str] = None
-    # prev_pitch_type: Optional[str] = None
-
-    # balls: Optional[float] = 0
-    # strikes: Optional[float] = 0
-    # outs_when_up: Optional[float] = 0
-    # inning: Optional[float] = 0
-    # score_diff_bat: Optional[float] = 0
-    # on_1b: Optional[float] = 0
-    # on_2b: Optional[float] = 0
-    # on_3b: Optional[float] = 0
 
 def _infer_field_type(value: Any) -> Any:
     if value is None:
