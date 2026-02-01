@@ -3,10 +3,8 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Protocol
 
 import numpy as np
+from pydantic import BaseModel
 import torch
-
-from model_development.util.pitch_state_builder import StaticPitchState
-
 
 class TensorArtifacts(Protocol):
     max_len: int
@@ -33,8 +31,8 @@ def _encode_num(value: Optional[float]) -> float:
     except (TypeError, ValueError):
         return 0.0
 
-
-def build_tensors(states: List[StaticPitchState], artifacts: TensorArtifacts) -> tuple[torch.Tensor, torch.Tensor, int]:
+# The `states` array is dynamically generated. We will need to QA this to ensure that the fields are accurately being applied
+def build_tensors(states: List[BaseModel], artifacts: TensorArtifacts) -> tuple[torch.Tensor, torch.Tensor, int]:
     # Convert a list of pitch states into padded categorical/numeric tensors.
     max_len = artifacts.max_len
     seq_len = min(len(states), max_len, 4)

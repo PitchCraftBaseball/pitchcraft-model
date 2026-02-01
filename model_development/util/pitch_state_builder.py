@@ -3,10 +3,6 @@ from __future__ import annotations
 from pydantic import BaseModel, create_model
 from typing import Any, Dict, List, Optional
 
-class StaticPitchState(BaseModel):
-    pitcher: int
-    batter: int
-
 def _infer_field_type(value: Any) -> Any:
     if value is None:
         return Any
