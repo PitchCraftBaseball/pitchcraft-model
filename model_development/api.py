@@ -10,8 +10,10 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 import torch.nn as nn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from pitchstate import StaticPitchState, build_pitch_state_from_features
+
 # Ensure repo root is on sys.path so "src" imports resolve when running from model_development.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -57,27 +59,6 @@ class SimplePitchRNN(nn.Module):
         x = torch.cat(embs + [x_num], dim=-1)
         h, _ = self.rnn(x)
         return self.fc(h)
-
-# TODO: either get this code generated and move it to a different file for validation, or discuss another approach\
-# todo: consider creating field exclusion set that allows fields that are only used for inference 
-class PitchState(BaseModel):
-    pitcher: Optional[str] = None
-    batter: Optional[str] = None
-    stand: Optional[str] = None
-    p_throws: Optional[str] = None  
-    inning_topbot: Optional[str] = None
-    count_state: Optional[str] = None
-    prev_pitch_type: Optional[str] = None
-
-    balls: Optional[float] = 0
-    strikes: Optional[float] = 0
-    outs_when_up: Optional[float] = 0
-    inning: Optional[float] = 0
-    score_diff_bat: Optional[float] = 0
-    on_1b: Optional[float] = 0
-    on_2b: Optional[float] = 0
-    on_3b: Optional[float] = 0
-
 
 class PredictRequest(BaseModel):
     # Player IDs to use when retrieving batter/pitcher features.
@@ -162,7 +143,6 @@ def _encode_cat(value: Optional[str], vocab: Dict[str, int], pad_id: int) -> int
         return pad_id
     return int(vocab.get(str(value), pad_id))
 
-
 def _encode_num(value: Optional[float]) -> float:
     # Coerce numeric values to float; return 0.0 for missing/invalid input.
     if value is None:
@@ -172,8 +152,7 @@ def _encode_num(value: Optional[float]) -> float:
     except (TypeError, ValueError):
         return 0.0
 
-
-def build_tensors(states: List[PitchState], artifacts: Artifacts) -> tuple[torch.Tensor, torch.Tensor, int]:
+def build_tensors(states: List[StaticPitchState], artifacts: Artifacts) -> tuple[torch.Tensor, torch.Tensor, int]:
     # Convert a list of pitch states into padded categorical/numeric tensors.
     max_len = artifacts.max_len
     seq_len = min(len(states), max_len, 4)
@@ -192,7 +171,6 @@ def build_tensors(states: List[PitchState], artifacts: Artifacts) -> tuple[torch
     x_cat_t = torch.tensor(x_cat, dtype=torch.long).unsqueeze(0)
     x_num_t = torch.tensor(x_num, dtype=torch.float32).unsqueeze(0)
     return x_cat_t, x_num_t, seq_len
-
 
 def _fetch_player_features(
     cursor,
@@ -234,26 +212,6 @@ def _fetch_player_features(
         handle.write(f"retrieved_features={features}\n")
         handle.write("---\n")
     return features
-
-
-def _build_pitch_state_from_features(
-    pitcher_id: str,
-    batter_id: str,
-    state_features: Dict[str, Any],
-    batter_features: Dict[str, Optional[str]],
-    pitcher_features: Dict[str, Optional[str]],
-) -> PitchState:
-    # Boilerplate mapper from retrieved features into the PitchState schema.
-    # TODO: Map feature names to the PitchState fields and numeric inputs.
-    merged: Dict[str, Any] = {}
-    merged.update(state_features)
-    merged.update(batter_features)
-    merged.update(pitcher_features)
-    # Ensure player IDs are always set from the request.
-    merged["pitcher"] = pitcher_id
-    merged["batter"] = batter_id
-    return PitchState(**merged)
-
 
 def create_app() -> FastAPI:
     # Initialize the FastAPI app, load artifacts/model, and register routes.
@@ -308,7 +266,7 @@ def create_app() -> FastAPI:
 
         # Build a single-step sequence for now; expand once feature mapping is implemented.
         states = [
-            _build_pitch_state_from_features(
+            build_pitch_state_from_features(
                 req.pitcher,
                 req.batter,
                 req.state_features,
@@ -347,6 +305,5 @@ def create_app() -> FastAPI:
         return pitches
 
     return app
-
 
 app = create_app()
