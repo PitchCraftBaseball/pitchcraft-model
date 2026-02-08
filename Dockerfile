@@ -6,8 +6,9 @@ COPY requirements.txt ./requirements.txt
 
 RUN pip install --no-cache-dir --upgrade -r ./requirements.txt
 
-COPY /model_server ./model_server
+COPY model_server ./model_server
+COPY model_shared ./model_shared
 
-RUN ["python", "./model_server/build_model_config.py"] 
+RUN ["python", "./model_server/config-generators/build_model_config.py"]
 
-CMD ["uvicorn", "model_server.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "model_server.src.api:app", "--host", "0.0.0.0", "--port", "8000"]

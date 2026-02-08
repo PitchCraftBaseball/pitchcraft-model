@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 from datetime import datetime
-from src.data.db import find_table_for_column, get_read_cursor
+from model_shared.db import find_table_for_column, get_read_cursor
 
 def fetch_player_features(
     player_id: str,

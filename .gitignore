@@ -3,6 +3,6 @@ __pycache__/
 venv/
 *~
 */vocab/rnn*
-model-server/output/player-feature-retrieval-debug/*.log
-model-server/output/vocab/*.csv
+model_server/output/player-feature-retrieval-debug/*.log
+model_server/output/vocab/*.csv
 model-training-notebooks/src/rnn_data/*.csv

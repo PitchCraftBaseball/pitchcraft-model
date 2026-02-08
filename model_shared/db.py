@@ -5,7 +5,7 @@ from contextlib import contextmanager
 import psycopg2.pool
 from psycopg2.extensions import cursor as Cursor
 from psycopg2 import sql
-from src.utils.logger import logger
+from .logger import logger
 
 
 load_dotenv()
