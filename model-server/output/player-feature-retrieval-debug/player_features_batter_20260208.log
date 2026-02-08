@@ -1,0 +1,8 @@
+player_ID=595777
+requested_features=['stand']
+retrieved_features={'stand': 'L'}
+---
+player_ID=595777
+requested_features=['stand']
+retrieved_features={'stand': 'L'}
+---
