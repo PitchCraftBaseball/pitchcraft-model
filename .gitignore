@@ -6,3 +6,5 @@ venv/
 model_server/output/player-feature-retrieval-debug/*.log
 model_server/output/vocab/*.csv
 model-training-notebooks/src/rnn_data/*.csv
+model-training-notebooks/*csv
+model_shared/feature-list/*.csv

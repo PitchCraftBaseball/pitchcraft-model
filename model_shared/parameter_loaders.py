@@ -8,12 +8,13 @@ from typing import Dict
 RNN_VERSION = "v0_1"
 VOCAB_DIR = ""
 TRAINED_PARAMETERS_DIR = Path(__file__).resolve().parent / "trained-parameters"
+VOCAB_DIR = Path(__file__).resolve().parent / "vocab"
 
 
 # all loader functions
-def latest_vocab_csv(vocab_dir: Path) -> Path:
+def latest_vocab_csv() -> Path:
     # Pick the most recent vocab file based on the YYYYMMDD suffix in the filename.
-    vocab_files = sorted(vocab_dir.glob("rnn_vocab_*.csv"))
+    vocab_files = sorted(VOCAB_DIR.glob("rnn_vocab_*.csv"))
     if not vocab_files:
         raise RuntimeError("No vocab files found in vocab/. Run the notebook to generate rnn_vocab_YYYYMMDD.csv.")
     return vocab_files[-1]

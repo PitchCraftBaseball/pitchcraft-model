@@ -188,8 +188,9 @@ import pandas as pd
 
 # Export vocabularies and feature lists with a date-stamped filename.
 today = datetime.now().strftime("%Y%m%d")
-vocab_dir = Path.cwd().parent / "vocab"
-feature_dir = Path.cwd().parent / "feature-list"
+repo_root = Path.cwd().parent
+vocab_dir = repo_root / "model_shared" / "vocab"
+feature_dir = repo_root / "model_shared" / "feature-list"
 vocab_dir.mkdir(parents=True, exist_ok=True)
 feature_dir.mkdir(parents=True, exist_ok=True)
 
