@@ -63,7 +63,7 @@ class Artifacts:
         self.num_cols = list(self.feature_spec["num_cols"])
 
         # Load vocabularies from the most recent vocab export.
-        vocab_path = latest_vocab_csv(Path(__file__).resolve().parent.parent / "output" / "vocab")
+        vocab_path = latest_vocab_csv()
         self.cat_vocabs, self.y_vocab = load_vocabs_from_csv(vocab_path)
 
         self.id_to_pitch = {int(v): k for k, v in self.y_vocab.items()}
