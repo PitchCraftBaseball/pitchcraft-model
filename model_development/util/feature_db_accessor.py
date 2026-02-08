@@ -18,6 +18,7 @@ def fetch_player_features(
         for feature in feature_names:
             table = find_table_for_column("public", feature)
             if table is None:
+                print(f"no table found for: {feature}")
                 features[feature] = None
                 continue
             id_column = "player_id"
@@ -32,7 +33,7 @@ def fetch_player_features(
                 (player_id,),
             )
             row = cursor.fetchone()
-            features[feature] = row[0] if row else None
+            features[feature] = row[0] if row else None # gets the only thing that should be in the tuple because we are requesting for one column from the table
         # Debug: write out retrieved feature values to a dated log file.
         _log_player_feature_retrieval(player_id, feature_names, entity, features)
         return features
