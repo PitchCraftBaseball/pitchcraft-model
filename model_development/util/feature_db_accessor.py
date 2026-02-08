@@ -32,7 +32,7 @@ def fetch_player_features(
                 (player_id,),
             )
             row = cursor.fetchone()
-            features[feature] = row[0] if row else None
+            features[feature] = row[0] if row else None # gets the only thing that should be in the tuple because we are requesting for one column from the table
         # Debug: write out retrieved feature values to a dated log file.
         _log_player_feature_retrieval(player_id, feature_names, entity, features)
         return features
