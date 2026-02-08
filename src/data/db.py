@@ -37,18 +37,22 @@ def get_read_cursor() -> Iterator[Cursor]:
         pool.putconn(conn)
     
 def query_table_for_features(table_name: str, features: list[str]) -> Cursor:
-    query = sql.SQL("select {fields} from {table};").format(
+    query = sql.SQL(
+        "select {fields} from {table} "
+        "where {date_col} >= date_trunc('year', current_date) - interval '1 year' "
+        "and {date_col} < date_trunc('year', current_date);"
+    ).format(
         fields=sql.SQL(',').join([
             sql.Identifier(x) for x in features
-        ]), 
-        table=sql.Identifier(table_name)
+        ]),
+        table=sql.Identifier(table_name),
+        date_col=sql.Identifier("game_date")
     )
-    print(f"DEBUG: {query}")
-
     # run query 
     with get_read_cursor() as cursor: 
         cursor.execute(query)
-        return cursor
+        print(f"Query completed")
+        return cursor.fetchall()
 
 
 def find_table_for_column(schema: str, column: str) -> Optional[str]:

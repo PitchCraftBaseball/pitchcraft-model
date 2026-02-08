@@ -6,3 +6,4 @@ venv/
 */vocab/rnn*
 model_development/player-feature-retrieval-debug/
 model_development/player-feature-retrieval-debug/*
+model_development/model-training-notebooks/src/*.csv

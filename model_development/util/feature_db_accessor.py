@@ -18,6 +18,7 @@ def fetch_player_features(
         for feature in feature_names:
             table = find_table_for_column("public", feature)
             if table is None:
+                print(f"no table found for: {feature}")
                 features[feature] = None
                 continue
             id_column = "player_id"

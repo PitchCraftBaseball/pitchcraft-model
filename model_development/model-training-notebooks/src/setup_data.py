@@ -14,9 +14,15 @@ the training data (as of 2/8/2026) only pulls from the historical table for data
 we should probably talk about that 
 """
 
-from src.data.db import find_table_for_column, query_table_for_features
 import csv
+from pathlib import Path
 import sys
+
+repo_root = Path(__file__).resolve().parents[3]
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+from src.data.db import find_table_for_column, query_table_for_features
 
 """
     Validates the fields that are passed by the feature_list file. 
@@ -29,7 +35,11 @@ def validate_feature_list_file(filename: str):
     table_to_features_map: dict[str, list[str]] = {}
     with open(filename, "r") as file: 
         for feature in file:
-            table_name = find_table_for_column(feature)
+            if (feature[0] == "#"): # * Support for comments in the feature file
+                # print(f"{feature} is currently disabled")
+                continue
+            feature = feature.strip()
+            table_name = find_table_for_column("public", feature)
             if table_name is None:
                 print(f"Couldn't find a table that contained the feature: {feature}")
                 return None
@@ -49,8 +59,9 @@ if __name__ == "__main__":
     feature_name_list = validate_feature_list_file(feature_list_file)
     if feature_name_list: 
         for table_name, feature_list in feature_name_list.items(): 
-            cursor = query_table_for_features(table_name, feature_list)
-            cursor_result = cursor.fetchall()
+            print("Querying table")
+            cursor_result = query_table_for_features(table_name, feature_list)
+            print("Writing to file...")
             with open(f'{table_name}_rnn_data.csv', 'w', newline='') as csvFile: 
                 writer = csv.writer(csvFile) 
                 writer.writerow(feature_list)
