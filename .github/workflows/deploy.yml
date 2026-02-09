@@ -56,7 +56,7 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           source: "docker-compose.yml"
-          target: /opt/pitchcraft-model-server
+          target: /opt/pitchcraft-model
           strip_components: 0
       
       - name: SSH deploy
