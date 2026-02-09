@@ -34,11 +34,11 @@ jobs:
           file: ./Dockerfile 
           push: true 
           platforms: linux/arm64
-          cache-from: type=registry,ref=ghcr.io/${{ env.OWNER }}/pitchcraft-web:buildcache
-          cache-to: type=registry,ref=ghcr.io/${{ env.OWNER }}/pitchcraft-web:buildcache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ env.OWNER }}/pitchcraft-model:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ env.OWNER }}/pitchcraft-model:buildcache,mode=max
           tags: |
-            ghcr.io/${{ env.OWNER }}/pitchcraft-web:${{ github.sha }}
-            ghcr.io/${{ env.OWNER }}/pitchcraft-web:latest
+            ghcr.io/${{ env.OWNER }}/pitchcraft-model:${{ github.sha }}
+            ghcr.io/${{ env.OWNER }}/pitchcraft-model:latest
 
   deploy:
     runs-on: ubuntu-latest
