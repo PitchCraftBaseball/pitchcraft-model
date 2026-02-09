@@ -16,6 +16,7 @@ You may need to generate a personal access token through GitHub to clone via HTT
 
 **2. Navigate to the root of the project and install the required dependencies:**
 
+
 ```bash
 make install
 ```
@@ -51,4 +52,3 @@ with get_read_cursor() as cursor:
 
 # Notes
 1) `psycog2` WILL NOT BUILD WITH ANY VERSION OF PYTHON>=3.11 
-2) `bruno-templates` work with [bruno](https://www.usebruno.com/) which is a nifty offline Postman clone that lets us easily share request templates through Git. 

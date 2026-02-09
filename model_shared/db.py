@@ -1,14 +1,22 @@
 import os
+from pathlib import Path
 from typing import Iterator, Optional
 from dotenv import load_dotenv
 from contextlib import contextmanager
 import psycopg2.pool
 from psycopg2.extensions import cursor as Cursor
 from psycopg2 import sql
-from src.utils.logger import logger
+from .logger import logger
 
 
 load_dotenv()
+
+_repo_root = Path(__file__).resolve().parents[1]
+_cert_path = os.getenv("DB_RDS_CERT_PATH")
+if _cert_path:
+    cert_path = Path(_cert_path)
+    if not cert_path.is_absolute():
+        _cert_path = str(_repo_root / cert_path)
 
 pool = psycopg2.pool.SimpleConnectionPool(
     minconn=1,
@@ -19,7 +27,7 @@ pool = psycopg2.pool.SimpleConnectionPool(
     password=os.getenv("DB_PASSWORD"),
     dbname=os.getenv("DB_DATABASE"),
     sslmode="verify-full",
-    sslrootcert=os.getenv("DB_RDS_CERT_PATH")
+    sslrootcert=_cert_path
 )
 
 @contextmanager

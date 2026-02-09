@@ -10,15 +10,10 @@ import torch.nn as nn
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-# Ensure repo root is on sys.path so "src" imports resolve when running from model_development.
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from model_development.util.pitch_state_builder import build_pitch_state_from_features
-from model_development.util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
-from model_development.util.parameter_loaders import latest_parameters, latest_vocab_csv, load_vocabs_from_csv
-from model_development.util.feature_db_accessor import fetch_player_features
+from .util.pitch_state_builder import build_pitch_state_from_features
+from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
+from model_shared.parameter_loaders import latest_parameters, latest_vocab_csv, load_vocabs_from_csv
+from .util.feature_db_accessor import fetch_player_features
 
 # TODO: add controller error messaging that simply errors if the player ID is invalid
 
@@ -68,7 +63,7 @@ class Artifacts:
         self.num_cols = list(self.feature_spec["num_cols"])
 
         # Load vocabularies from the most recent vocab export.
-        vocab_path = latest_vocab_csv(Path("vocab"))
+        vocab_path = latest_vocab_csv()
         self.cat_vocabs, self.y_vocab = load_vocabs_from_csv(vocab_path)
 
         self.id_to_pitch = {int(v): k for k, v in self.y_vocab.items()}
@@ -102,9 +97,8 @@ def create_app() -> FastAPI:
     # Initialize the FastAPI app, load artifacts/model, and register routes.
     app = FastAPI(title="Pitch RNN Inference API")
 
-    artifacts_path = Path("model_config.json")
-    model_dir = Path(Path.cwd() / "model-training-notebooks" / "trained-parameters")
-    model_path = latest_parameters(model_dir)
+    artifacts_path = Path(__file__).resolve().parent / "model_config.json"
+    model_path = latest_parameters()
 
     if not artifacts_path.exists():
         raise RuntimeError("Missing model_config.json. Provide feature spec + vocabs before starting the API.")
