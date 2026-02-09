@@ -15,7 +15,6 @@ returns pitch-type probabilities for each pitch in an input sequence.
 If you are updating the model training hyperparameters or the feature list being used during training, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
 
 ## Setup
-
 1) Install dependencies:
 ```bash
 pip install -r requirements.txt
@@ -23,7 +22,7 @@ pip install -r requirements.txt
 
 2) Create config (feature spec + hyperparams):
 ```bash
-python build_model_config.py
+python ./config-generators/build_model_config.py
 ```
 
 3) Generate vocab exports from the training notebook:

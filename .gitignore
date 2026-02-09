@@ -2,7 +2,9 @@
 __pycache__/
 venv/
 *~
-rnn_data.csv
 */vocab/rnn*
-model_development/player-feature-retrieval-debug/
-model_development/player-feature-retrieval-debug/*
+model_server/src/output/player-feature-retrieval-debug/*.log
+
+model-training-notebooks/src/rnn_data/*.csv
+model-training-notebooks/*csv
+model_shared/feature-list/*.csv

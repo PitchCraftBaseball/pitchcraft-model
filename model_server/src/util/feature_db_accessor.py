@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 from datetime import datetime
-from src.data.db import find_table_for_column, get_read_cursor
+from model_shared.db import find_table_for_column, get_read_cursor
 
 def fetch_player_features(
     player_id: str,
@@ -18,6 +18,7 @@ def fetch_player_features(
         for feature in feature_names:
             table = find_table_for_column("public", feature)
             if table is None:
+                print(f"no table found for: {feature}")
                 features[feature] = None
                 continue
             id_column = "player_id"
@@ -32,13 +33,13 @@ def fetch_player_features(
                 (player_id,),
             )
             row = cursor.fetchone()
-            features[feature] = row[0] if row else None
+            features[feature] = row[0] if row else None # gets the only thing that should be in the tuple because we are requesting for one column from the table
         # Debug: write out retrieved feature values to a dated log file.
         _log_player_feature_retrieval(player_id, feature_names, entity, features)
         return features
 
 def _log_player_feature_retrieval(player_id, feature_names, entity, features):
-    debug_dir = Path("player-feature-retrieval-debug")
+    debug_dir = Path(Path(__file__).resolve().parent.parent / "output" / "player-feature-retrieval-debug")
     debug_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d")
     debug_path = debug_dir / f"player_features_{entity}_{stamp}.log"

@@ -6,19 +6,22 @@ from typing import Dict
 
 # TODO: MOVE THESE GLOBALS TO A CONFIG FILE?
 RNN_VERSION = "v0_1"
+VOCAB_DIR = ""
+TRAINED_PARAMETERS_DIR = Path(__file__).resolve().parent / "trained-parameters"
+VOCAB_DIR = Path(__file__).resolve().parent / "vocab"
 
 
 # all loader functions
-def latest_vocab_csv(vocab_dir: Path) -> Path:
+def latest_vocab_csv() -> Path:
     # Pick the most recent vocab file based on the YYYYMMDD suffix in the filename.
-    vocab_files = sorted(vocab_dir.glob("rnn_vocab_*.csv"))
+    vocab_files = sorted(VOCAB_DIR.glob("rnn_vocab_*.csv"))
     if not vocab_files:
         raise RuntimeError("No vocab files found in vocab/. Run the notebook to generate rnn_vocab_YYYYMMDD.csv.")
     return vocab_files[-1]
 
 
-def latest_parameters(trained_parameters_dir: Path) -> Path:
-    parameters_files = sorted(trained_parameters_dir.glob(f"simple_rnn_{RNN_VERSION}_*.pt"))
+def latest_parameters() -> Path:
+    parameters_files = sorted(TRAINED_PARAMETERS_DIR.glob(f"simple_rnn_{RNN_VERSION}_*.pt"))
     if not parameters_files:
         raise RuntimeError("No trained parameters found. Run training once and commit parameters file.")
     return parameters_files[-1]
