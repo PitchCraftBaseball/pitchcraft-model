@@ -58,6 +58,7 @@ jobs:
           source: "docker-compose.yml"
           target: /opt/pitchcraft-model
           strip_components: 0
+          debug: true
       
       - name: SSH deploy
         uses: appleboy/ssh-action@v1.0.3
