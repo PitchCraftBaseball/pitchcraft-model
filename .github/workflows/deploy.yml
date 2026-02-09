@@ -30,8 +30,8 @@ jobs:
       - name: Build & push model server 
         uses: docker/build-push-action/@v6
         with: 
-          context: ./pitchcraft-model 
-          file: ./pitchcraft-model/Dockerfile 
+          context: ./
+          file: ./Dockerfile 
           push: true 
           platforms: linux/arm64,linux/amd64
           tags: |
