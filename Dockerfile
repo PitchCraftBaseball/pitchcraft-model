@@ -7,7 +7,9 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --upgrade -r ./requirements.txt
 
 COPY model_server ./model_server
+
 COPY model_shared ./model_shared
+
 COPY certs ./certs
 
 RUN ["python", "./model_server/config-generators/build_model_config.py"]
