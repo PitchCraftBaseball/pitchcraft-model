@@ -28,7 +28,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Build & push model server 
-        uses: docker/build-push-action/@v6
+        uses: docker/build-push-action@v6
         with: 
           context: ./
           file: ./Dockerfile 
@@ -69,16 +69,16 @@ jobs:
             set -e
             mkdir -p /opt/pitchcraft-model
             cd /opt/pitchcraft-model 
-            echo "IMAGE_TAG=${{ github.sha }}" > .env.runtime
-            echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" > /opt/pitchcraft-model/.env
-            echo "DB_HOST=${{ secrets.DB_HOST }}" > /opt/pitchcraft-model/.env
-            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" > /opt/pitchcraft-model/.env
-            echo "DB_PORT=${{ secrets.DB_PORT }}" > /opt/pitchcraft-model/.env
-            echo "DB_RDS_CERT_PATH=${{ secrets.DB_RDS_CERT_PATH }}" > /opt/pitchcraft-model/.env
+            echo "IMAGE_TAG=${{ github.sha }}" >> .env.runtime
+            echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> /opt/pitchcraft-model/.env
+            echo "DB_HOST=${{ secrets.DB_HOST }}" >> /opt/pitchcraft-model/.env
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> /opt/pitchcraft-model/.env
+            echo "DB_PORT=${{ secrets.DB_PORT }}" >> /opt/pitchcraft-model/.env
+            echo "DB_RDS_CERT_PATH=${{ secrets.DB_RDS_CERT_PATH }}" >> /opt/pitchcraft-model/.env
             echo "DB_USER=${{ secrets.DB_USER }}" /opt/pitchcraft-model/.env
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             DC="docker compose"
-            if command -v docker-compose >/dev/null 2>&1; then DC="docker compose"; fi 
+            if command -v docker-compose >>/dev/null 2>>&1; then DC="docker-compose"; fi 
             $DC --env-file .env.runtime pull 
             $DC --env-file .env.runtime up -d --remove-orphans
             docker image prune -f
