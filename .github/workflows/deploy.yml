@@ -70,13 +70,14 @@ jobs:
             set -e
             mkdir -p /opt/pitchcraft-model
             cd /opt/pitchcraft-model 
+            truncate -s 0 /opt/pitchcraft-model/.env
             echo "IMAGE_TAG=${{ github.sha }}" >> .env.runtime
+            echo "DB_USER=${{ secrets.DB_USER }}" /opt/pitchcraft-model/.env
             echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> /opt/pitchcraft-model/.env
             echo "DB_HOST=${{ secrets.DB_HOST }}" >> /opt/pitchcraft-model/.env
             echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> /opt/pitchcraft-model/.env
             echo "DB_PORT=${{ secrets.DB_PORT }}" >> /opt/pitchcraft-model/.env
             echo "DB_RDS_CERT_PATH=${{ secrets.DB_RDS_CERT_PATH }}" >> /opt/pitchcraft-model/.env
-            echo "DB_USER=${{ secrets.DB_USER }}" /opt/pitchcraft-model/.env
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             DC="docker compose"
             if command -v docker-compose >/dev/null 2>&1; then DC="docker-compose"; fi
