@@ -13,4 +13,4 @@ services:
     volumes:
       - ./certs:/certs:ro
     ports:
-      - "8000:8000"
+      - "3175:8000"
