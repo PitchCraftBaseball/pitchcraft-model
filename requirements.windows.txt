@@ -1,0 +1,35 @@
+# Windows-focused requirements for this project.
+# Notes:
+# - Linux-only CUDA/NVIDIA packages and Triton removed.
+# - psycopg2 uses the prebuilt binary wheel on Windows.
+# - If torch install fails, follow the official PyTorch selector for
+#   a Windows-compatible build and pin that version here.
+
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.12.1
+click==8.3.1
+colorlog==6.8.2
+fastapi==0.128.0
+filelock==3.20.3
+fsspec==2026.1.0
+h11==0.16.0
+idna==3.11
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+mpmath==1.3.0
+networkx==3.6.1
+numpy==2.4.2
+pandas==3.0.0
+psycopg2-binary==2.9.9
+pydantic==2.12.5
+pydantic_core==2.41.5
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.1
+six==1.17.0
+starlette==0.50.0
+sympy==1.14.0
+torch==2.10.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+uvicorn==0.40.0
