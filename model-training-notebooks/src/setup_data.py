@@ -1,5 +1,5 @@
 """
-Docstring for model_development.model-training-notebooks.src.setup_data
+Docstring for model-training-notebooks.src.setup_data
 
 setup_data.py takes the beginning of the RNN training notebook (data prep)
 and turns it into a setup script. The proposed workflow is 
@@ -18,12 +18,8 @@ import csv
 from pathlib import Path
 import sys
 
-# TODO: get rid of this, very hacky
-repo_root = Path(__file__).resolve().parents[3]
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
 
-from src.data.db import find_table_for_column, query_table_for_features
+from model_shared.db import find_table_for_column, query_table_for_features
 
 """
     Validates the fields that are passed by the feature_list file. 

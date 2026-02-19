@@ -12,6 +12,8 @@ COPY model_shared ./model_shared
 
 COPY certs ./certs
 
-RUN ["python", "./model_server/config-generators/build_model_config.py"]
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "model_server.src.api:app", "--host", "0.0.0.0", "--port", "8000"]

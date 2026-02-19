@@ -61,7 +61,10 @@ def main() -> None:
         "hidden": HIDDEN,
     }
 
-    Path("model_config.json").write_text(json.dumps(artifacts, indent=2))
+    repo_root = Path(__file__).resolve().parents[2]
+    output_path = repo_root / "model_server" / "src" / "model_config.json"
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(artifacts, indent=2))
     print("Wrote model_config.json (fill in vocabularies before running the API)")
 
  
