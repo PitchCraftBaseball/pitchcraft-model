@@ -1,0 +1,17 @@
+feature,kind
+pitcher,categorical
+batter,categorical
+stand,categorical
+p_throws,categorical
+inning_topbot,categorical
+count_state,categorical
+prev_pitch_type,categorical
+balls,numerical
+strikes,numerical
+outs_when_up,numerical
+inning,numerical
+score_diff_bat,numerical
+on_1b,numerical
+on_2b,numerical
+on_3b,numerical
+y_next_pitch_type,target
