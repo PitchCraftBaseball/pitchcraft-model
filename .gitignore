@@ -7,3 +7,7 @@ model_server/src/output/player-feature-retrieval-debug/*.log
 model-training-notebooks/src/rnn_data/*.csv
 model-training-notebooks/*csv
 .python-version
+
+# macOS
+.DS_Store
+**/.DS_Store
