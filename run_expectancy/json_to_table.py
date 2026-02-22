@@ -69,11 +69,11 @@ with open(file_name, 'r') as file:
         "SC": "Screwball",
     }
 
-    output_dir = f"pitch_type_tables_{start_year}-{end_year}"
-    os.makedirs(output_dir, exist_ok=True)
-    print(f"Output directory: {output_dir}")
+    graphics_dir = f"graphics_{start_year}-{end_year}"
+    os.makedirs(graphics_dir, exist_ok=True)
+    print(f"Output directory: {graphics_dir}")
 
-    # generate a table for each pitch type where column are counts, and rows are bases and outs, and the values are run expectancy
+    # Generate heatmap for each pitch type
     for pitch_type in p_pitch_types:
         rows = []
         occ_rows = []
@@ -108,27 +108,8 @@ with open(file_name, 'r') as file:
         df_occ = df_occ.set_index(["outs", "bases"])
         df_occ = df_occ[p_counts]
 
-        output_path = os.path.join(output_dir, f"{pitch_type}_run_expectancy.csv")
-        df.to_csv(output_path)
-        
-        occ_path = os.path.join(output_dir, f"{pitch_type}_occurrences.csv")
-        df_occ.to_csv(occ_path)
-
-    graphics_dir = os.path.join(output_dir, "graphics")
-    os.makedirs(graphics_dir, exist_ok=True)
-
-    for file_name in os.listdir(output_dir):
-        if not file_name.endswith("_run_expectancy.csv"):
-            continue
-
-        csv_path = os.path.join(output_dir, file_name)
-        df = pd.read_csv(csv_path, index_col=[0, 1])
+        # Convert to numpy arrays for visualization
         values = df.to_numpy(dtype=float)
-        
-        # Load occurrences
-        occ_file = file_name.replace("_run_expectancy.csv", "_occurrences.csv")
-        occ_path = os.path.join(output_dir, occ_file)
-        df_occ = pd.read_csv(occ_path, index_col=[0, 1])
         occurrences = df_occ.to_numpy(dtype=float)
         
         # Create mask for low occurrence cells
@@ -183,12 +164,10 @@ with open(file_name, 'r') as file:
         ax.set_xticks(np.arange(len(df.columns)))
         ax.set_xticklabels(df.columns, rotation=45, ha="right")
 
-        pitch_code = file_name.replace("_run_expectancy.csv", "")
-        pitch_name = pitch_type_names.get(pitch_code, "Unknown Pitch")
-        ax.set_title(f"{pitch_code} - {pitch_name} ({start_year}-{end_year})")
+        pitch_name = pitch_type_names.get(pitch_type, "Unknown Pitch")
+        ax.set_title(f"{pitch_type} - {pitch_name} ({start_year}-{end_year})")
 
         fig.tight_layout()
-        image_name = file_name.replace(".csv", ".png")
-        fig_path = os.path.join(graphics_dir, image_name)
+        fig_path = os.path.join(graphics_dir, f"{pitch_type}_run_expectancy.png")
         fig.savefig(fig_path, dpi=200)
         plt.close(fig)
