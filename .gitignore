@@ -4,7 +4,7 @@ venv/
 *~
 */vocab/rnn*
 model_server/src/output/player-feature-retrieval-debug/*.log
-
+.venv/
 model-training-notebooks/src/rnn_data/*.csv
 model-training-notebooks/*csv
 model_shared/feature-list/*.csv
