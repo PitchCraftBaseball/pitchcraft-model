@@ -9,6 +9,7 @@ p_throws
 balls
 strikes
 game_year
+game_type
 on_3b
 on_2b
 on_1b
