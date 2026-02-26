@@ -11,7 +11,7 @@ returns pitch-type probabilities for each pitch in an input sequence.
 - `vocab/`: Date-stamped vocab exports from the training notebook (`rnn_vocab_YYYYMMDD.csv`).
 
 ## Updating Model Training 
-If you are updating the model training hyperparameters or the feature list being used during training, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
+If you are updating the model training hyperparameters, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
 
 ## Setup
 1) Install dependencies:
@@ -26,13 +26,16 @@ python ./config-generators/build_model_config.py
 
 3) Generate vocab exports from the training notebook:
 - `vocab/rnn_vocab_YYYYMMDD.csv` (categorical + target vocabs)
-- `feature-list/rnn_vocab_YYYYMMDD.csv` (feature list)
-
 
 ## Run the API
 
 ```bash
 uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+If you run from the project root, you can also run 
+```bash 
+./start_server
 ```
 
 ## Test Run
