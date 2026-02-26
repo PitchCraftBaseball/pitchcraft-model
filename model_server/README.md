@@ -9,7 +9,6 @@ returns pitch-type probabilities for each pitch in an input sequence.
 - `build_model_config.py`: Writes a template `model_config.json` (feature spec + hyperparams).
 - `model_config.json`: Feature spec + model hyperparams (vocabs are loaded from `vocab/`).
 - `vocab/`: Date-stamped vocab exports from the training notebook (`rnn_vocab_YYYYMMDD.csv`).
-- `feature-list/`: Date-stamped feature lists from the training notebook (`rnn_vocab_YYYYMMDD.csv`).
 
 ## Updating Model Training 
 If you are updating the model training hyperparameters or the feature list being used during training, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
