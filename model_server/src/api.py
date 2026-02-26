@@ -12,10 +12,15 @@ from pydantic import BaseModel, Field
 
 from .util.pitch_state_builder import build_pitch_state_from_features
 from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
-from model_shared.parameter_loaders import latest_parameters, latest_vocab_csv, load_vocabs_from_csv
+from model_shared.parameter_loaders import (
+    latest_parameters,
+    latest_vocab_csv,
+    load_vocabs_from_csv,
+)
 from .util.feature_db_accessor import fetch_player_features
 
 # TODO: add controller error messaging that simply errors if the player ID is invalid
+
 
 class SimplePitchRNN(nn.Module):
     def __init__(
@@ -49,6 +54,7 @@ class SimplePitchRNN(nn.Module):
         h, _ = self.rnn(x)
         return self.fc(h)
 
+
 class Artifacts:
     def __init__(self, path: Path) -> None:
         # Load feature spec and hyperparameters from model_config.json.
@@ -80,6 +86,7 @@ class Artifacts:
         # Compute total number of output classes (including padding id).
         return max([0] + [int(v) for v in self.y_vocab.values()]) + 1
 
+
 class PredictRequest(BaseModel):
     # Player IDs to use when retrieving batter/pitcher features.
     pitcher: str = Field(..., min_length=1)
@@ -89,6 +96,7 @@ class PredictRequest(BaseModel):
     # Feature name lists for the two retrieval buckets.
     batter_features: List[str] = Field(default_factory=list)
     pitcher_features: List[str] = Field(default_factory=list)
+
 
 PredictResponse = Dict[str, Dict[str, float]]
 
@@ -101,9 +109,13 @@ def create_app() -> FastAPI:
     model_path = latest_parameters()
 
     if not artifacts_path.exists():
-        raise RuntimeError("Missing model_config.json. Provide feature spec + vocabs before starting the API.")
+        raise RuntimeError(
+            "Missing model_config.json. Provide feature spec + vocabs before starting the API."
+        )
     if not model_path.exists():
-        raise RuntimeError("Missing simple_pitch_rnn_best.pt. Train the model before starting the API.")
+        raise RuntimeError(
+            "Missing simple_pitch_rnn_best.pt. Train the model before starting the API."
+        )
 
     artifacts = Artifacts(artifacts_path)
     model = SimplePitchRNN(
@@ -159,5 +171,6 @@ def create_app() -> FastAPI:
         return build_pitch_probabilities(probs, artifacts, seq_len)
 
     return app
+
 
 app = create_app()

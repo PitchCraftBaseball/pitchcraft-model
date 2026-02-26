@@ -43,6 +43,6 @@ def main() -> None:
     output_path.write_text(json.dumps(artifacts, indent=2))
     print("Wrote model_config.json (fill in vocabularies before running the API)")
 
- 
+
 if __name__ == "__main__":
     main()
