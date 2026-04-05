@@ -16,7 +16,7 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-model-training-notebooks/
+model_training_notebooks/
 model_development/
 src/
 start_server

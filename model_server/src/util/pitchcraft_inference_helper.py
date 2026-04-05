@@ -6,6 +6,7 @@ import numpy as np
 from pydantic import BaseModel
 import torch
 
+
 class TensorArtifacts(Protocol):
     max_len: int
     pad_id: int
@@ -31,13 +32,18 @@ def _encode_num(value: Optional[float]) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+
 # The `states` array is dynamically generated. We will need to QA this to ensure that the fields are accurately being applied
-def build_tensors(states: List[BaseModel], artifacts: TensorArtifacts) -> tuple[torch.Tensor, torch.Tensor, int]:
+def build_tensors(
+    states: List[BaseModel], artifacts: TensorArtifacts
+) -> tuple[torch.Tensor, torch.Tensor, int]:
     # Convert a list of pitch states into padded categorical/numeric tensors.
     max_len = artifacts.max_len
     seq_len = min(len(states), max_len, 4)
 
-    x_cat = np.full((max_len, len(artifacts.cat_cols)), artifacts.pad_id, dtype=np.int64)
+    x_cat = np.full(
+        (max_len, len(artifacts.cat_cols)), artifacts.pad_id, dtype=np.int64
+    )
     x_num = np.zeros((max_len, len(artifacts.num_cols)), dtype=np.float32)
 
     for i in range(seq_len):
