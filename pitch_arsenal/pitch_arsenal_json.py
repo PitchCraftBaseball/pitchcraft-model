@@ -53,7 +53,7 @@ pitch_classifications = {
 	"EP": "offspeed",
 
 	"AB": "other",
-	"IN": "other",
+	# "IN": "other",
 	# "PO": "other",
 	"UN": "other",
 }
