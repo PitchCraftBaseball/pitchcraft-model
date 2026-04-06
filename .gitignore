@@ -3,11 +3,12 @@ __pycache__/
 venv/
 *~
 model_server/src/output/player-feature-retrieval-debug/*.log
-
-model-training-notebooks/src/rnn_data/*.csv
-model-training-notebooks/*csv
+.venv/
+model_training_notebooks//src/rnn_data/*.csv
+model_training_notebooks//*csv
 .python-version
 
 # macOS
 .DS_Store
 **/.DS_Store
+model_training_notebooks/*.csv

@@ -3,11 +3,13 @@ from __future__ import annotations
 from pydantic import BaseModel, create_model
 from typing import Any, Dict, Optional
 
+
 def _infer_field_type(value: Any) -> Any:
     if value is None:
         return Any
     return type(value)
-    
+
+
 def build_pitch_state_from_features(
     pitcher_id: str,
     batter_id: str,
@@ -24,8 +26,7 @@ def build_pitch_state_from_features(
     merged["pitcher"] = pitcher_id
     merged["batter"] = batter_id
     field_definitions = {
-        key: (_infer_field_type(value), ...)
-        for key, value in merged.items()
+        key: (_infer_field_type(value), ...) for key, value in merged.items()
     }
     DynamicPitchState = create_model("DynamicPitchState", **field_definitions)
     return DynamicPitchState(**merged)

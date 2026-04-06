@@ -1,5 +1,5 @@
 """
-Docstring for model-training-notebooks.src.setup_data
+Docstring for model_training_notebooks.src.setup_data
 
 setup_data.py takes the beginning of the RNN training notebook (data prep)
 and turns it into a setup script. The proposed workflow is 
