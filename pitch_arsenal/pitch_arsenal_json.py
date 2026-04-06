@@ -61,12 +61,33 @@ pitch_classifications = {
 active_pitch_types = tuple(pitch_classifications.keys())
 
 
-def fetch_pitcher_pitch_type_rows(start_year: int = START_YEAR, end_year: int = END_YEAR) -> list[tuple[int, str, str, int, int]]:
+def _empty_pitch_stats() -> Dict[str, Any]:
+	return {
+		'pitches': 0,
+		'pitch_type': {},
+		'pitch_type_percentage': {},
+		'pitch_group': {
+			'fastball': 0,
+			'breaking': 0,
+			'offspeed': 0,
+			'other': 0,
+		},
+		'pitch_group_percentage': {
+			'fastball': 0.0,
+			'breaking': 0.0,
+			'offspeed': 0.0,
+			'other': 0.0,
+		},
+	}
+
+
+def fetch_pitcher_pitch_type_rows(start_year: int = START_YEAR, end_year: int = END_YEAR) -> list[tuple[int, str, int, str, int, int]]:
 	"""
-	Fetch pitcher rows with canonical player name and pitch type occurrence counts.
+	Fetch pitcher rows with canonical player name, year, pitch type occurrence counts,
+	and total rows for each pitcher/year.
 
 	Each returned row is:
-	(pitcher_id, canonical_player_name, pitch_type, occurrences, pitcher_total_rows)
+	(pitcher_id, canonical_player_name, game_year, pitch_type, occurrences, year_total_rows)
 	"""
 	logger.info(f"Fetching pitcher pitch-type usage for years {start_year}-{end_year}...")
 
@@ -94,6 +115,7 @@ def fetch_pitcher_pitch_type_rows(start_year: int = START_YEAR, end_year: int = 
 		), pitch_type_counts AS (
 			SELECT
 				pitcher,
+				game_year,
 				pitch_type,
 				COUNT(*) AS occurrences
 			FROM historical_pitches
@@ -103,30 +125,33 @@ def fetch_pitcher_pitch_type_rows(start_year: int = START_YEAR, end_year: int = 
 			  AND pitcher IS NOT NULL
 			  AND pitch_type IS NOT NULL
 			  AND pitch_type = ANY(%s)
-			GROUP BY pitcher, pitch_type
-		), pitcher_totals AS (
+			GROUP BY pitcher, game_year, pitch_type
+		), pitcher_year_totals AS (
 			SELECT
 				pitcher,
+				game_year,
 				COUNT(*) AS total_rows
 			FROM historical_pitches
 			WHERE game_year >= %s
 			  AND game_year <= %s
 			  AND game_type NOT IN ('E', 'S')
 			  AND pitcher IS NOT NULL
-			GROUP BY pitcher
+			GROUP BY pitcher, game_year
 		)
 		SELECT
 			ptc.pitcher,
 			cn.player_name,
+			ptc.game_year,
 			ptc.pitch_type,
 			ptc.occurrences,
 			pt.total_rows
 		FROM pitch_type_counts ptc
 		JOIN canonical_names cn
 		  ON ptc.pitcher = cn.pitcher
-		JOIN pitcher_totals pt
+		JOIN pitcher_year_totals pt
 		  ON ptc.pitcher = pt.pitcher
-		ORDER BY ptc.pitcher, ptc.occurrences DESC, ptc.pitch_type
+		 AND ptc.game_year = pt.game_year
+		ORDER BY ptc.pitcher, ptc.game_year, ptc.occurrences DESC, ptc.pitch_type
 	"""
 
 	with get_read_cursor() as cursor:
@@ -136,15 +161,15 @@ def fetch_pitcher_pitch_type_rows(start_year: int = START_YEAR, end_year: int = 
 		)
 		rows = cursor.fetchall()
 
-	logger.info(f"Fetched {len(rows):,} pitcher/pitch-type rows")
+	logger.info(f"Fetched {len(rows):,} pitcher/year/pitch-type rows")
 	return rows
 
 
-def build_pitch_arsenal_json(pitcher_pitch_type_rows: list[tuple[int, str, str, int, int]]) -> Dict[str, Dict[str, Any]]:
-	"""Build pitcher-indexed JSON object with pitch type occurrence counts."""
+def build_pitch_arsenal_json(pitcher_pitch_type_rows: list[tuple[int, str, int, str, int, int]]) -> Dict[str, Dict[str, Any]]:
+	"""Build pitcher-indexed JSON object with year-separated pitch stats."""
 	output: Dict[str, Dict[str, Any]] = {}
 
-	for pitcher_id, player_name, pitch_type, occurrences, total_rows in pitcher_pitch_type_rows:
+	for pitcher_id, player_name, game_year, pitch_type, occurrences, total_rows in pitcher_pitch_type_rows:
 		if pitch_type not in pitch_classifications:
 			continue
 
@@ -152,42 +177,34 @@ def build_pitch_arsenal_json(pitcher_pitch_type_rows: list[tuple[int, str, str, 
 		if pitcher_key not in output:
 			output[pitcher_key] = {
 				'player_name': player_name,
-				'pitches': int(total_rows),
-				'pitch_type': {},
-				'pitch_type_percentage': {},
-				'pitch_category': {
-					'fastball': 0,
-					'breaking': 0,
-					'offspeed': 0,
-					'other': 0,
-				},
-				'pitch_category_percentage': {
-					'fastball': 0.0,
-					'breaking': 0.0,
-					'offspeed': 0.0,
-					'other': 0.0,
-				},
-				'_total_rows': int(total_rows),
 			}
 
-		occurrences_int = int(occurrences)
-		output[pitcher_key]['pitch_type'][pitch_type] = occurrences_int
-		total_rows_int = output[pitcher_key]['_total_rows']
-		if total_rows_int > 0:
-			output[pitcher_key]['pitch_type_percentage'][pitch_type] = round(occurrences_int / total_rows_int, 6)
-		else:
-			output[pitcher_key]['pitch_type_percentage'][pitch_type] = 0.0
+		year_key = str(game_year)
+		if year_key not in output[pitcher_key]:
+			output[pitcher_key][year_key] = _empty_pitch_stats()
+			output[pitcher_key][year_key]['pitches'] = int(total_rows)
 
-		pitch_category = pitch_classifications.get(pitch_type, 'other')
-		output[pitcher_key]['pitch_category'][pitch_category] += occurrences_int
+		occurrences_int = int(occurrences)
+		year_stats = output[pitcher_key][year_key]
+		year_stats['pitch_type'][pitch_type] = occurrences_int
+		total_rows_int = year_stats['pitches']
+		if total_rows_int > 0:
+			year_stats['pitch_type_percentage'][pitch_type] = round(occurrences_int / total_rows_int, 6)
+		else:
+			year_stats['pitch_type_percentage'][pitch_type] = 0.0
+
+		pitch_group = pitch_classifications.get(pitch_type, 'other')
+		year_stats['pitch_group'][pitch_group] += occurrences_int
 
 	for pitcher_data in output.values():
-		total_rows_int = pitcher_data.pop('_total_rows', 0)
-		for category_name, category_count in pitcher_data['pitch_category'].items():
-			if total_rows_int > 0:
-				pitcher_data['pitch_category_percentage'][category_name] = round(category_count / total_rows_int, 6)
-			else:
-				pitcher_data['pitch_category_percentage'][category_name] = 0.0
+		for key, year_stats in list(pitcher_data.items()):
+			if key == 'player_name':
+				continue
+			for category_name, category_count in year_stats['pitch_group'].items():
+				if year_stats['pitches'] > 0:
+					year_stats['pitch_group_percentage'][category_name] = round(category_count / year_stats['pitches'], 6)
+				else:
+					year_stats['pitch_group_percentage'][category_name] = 0.0
 
 	return output
 
