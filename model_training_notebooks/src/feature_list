@@ -1,0 +1,41 @@
+pitch_type
+game_date
+batter
+pitcher
+description
+zone
+stand
+p_throws
+balls
+strikes
+game_year
+game_type
+on_3b
+on_2b
+on_1b
+outs_when_up
+inning
+inning_topbot
+sz_top
+sz_bot
+game_pk
+at_bat_number
+pitch_number
+pitch_name
+home_score
+away_score
+bat_score
+fld_score
+home_score_diff
+bat_score_diff
+# is_swing
+# is_whiff
+# is_called_strike
+# is_ball
+# in_zone
+# out_zone
+# count_state
+# score_diff_bat
+# pa_id
+# prev_pitch_type
+# seq_len

@@ -1,0 +1,16 @@
+version: "3.8"
+
+services:
+  pitchcraft-api:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    image: ghcr.io/pitchcraftbaseball/pitchcraft-model:${IMAGE_TAG}
+    env_file:
+      - .env
+    environment:
+      PGSSLROOTCERT: /certs/aws-rds-cert.pem
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "3175:8000"
