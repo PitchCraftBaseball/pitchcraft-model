@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-python ./model_server/config-generators/build_model_config.py
+python -m model_server.config-_generators.build_model_config
 
 exec "$@"

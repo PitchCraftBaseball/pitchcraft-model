@@ -12,3 +12,6 @@ model_training_notebooks//*csv
 .DS_Store
 **/.DS_Store
 model_training_notebooks/*.csv
+
+# AI 
+*.codex 

@@ -5,13 +5,12 @@ returns pitch-type probabilities for each pitch in an input sequence.
 
 ## Files
 
-- `api.py`: FastAPI app for inference.
-- `build_model_config.py`: Writes a template `model_config.json` (feature spec + hyperparams).
-- `model_config.json`: Feature spec + model hyperparams (vocabs are loaded from `vocab/`).
-- `vocab/`: Date-stamped vocab exports from the training notebook (`rnn_vocab_YYYYMMDD.csv`).
+- `src/api.py`: FastAPI app for inference.
+- `config_generators/build_model_config.py`: Writes a template `src/model_config.json` (feature spec + hyperparams).
+- `src/model_config.json`: Feature spec + model hyperparams.
 
 ## Updating Model Training 
-If you are updating the model training hyperparameters, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
+If you are updating the model training hyperparameters, please update `config_generators/build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
 
 ## Setup
 1) Install dependencies:
@@ -19,18 +18,18 @@ If you are updating the model training hyperparameters, please update `build_mod
 pip install -r requirements.txt
 ```
 
-2) Create config (feature spec + hyperparams):
+2) Create config (feature spec + hyperparams) from the repo root:
 ```bash
-python ./config-generators/build_model_config.py
+python -m model_server.config_generators.build_model_config
 ```
 
 3) Generate vocab exports from the training notebook:
-- `vocab/rnn_vocab_YYYYMMDD.csv` (categorical + target vocabs)
+- `model_shared/vocab/rnn_vocab_YYYYMMDD.csv` (categorical + target vocabs)
 
 ## Run the API
 
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
+uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000
 ```
 
 If you run from the project root, you can also run 
