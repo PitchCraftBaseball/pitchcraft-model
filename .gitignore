@@ -7,7 +7,6 @@ model_server/src/output/player-feature-retrieval-debug/*.log
 model_training_notebooks//src/rnn_data/*.csv
 model_training_notebooks//*csv
 .python-version
-<<<<<<< HEAD
 
 # macOS
 .DS_Store
@@ -16,8 +15,7 @@ model_training_notebooks/*.csv
 
 # AI 
 *.codex 
-=======
-model_training_notebooks/*.csv
+
 model-training-notebooks/*.csv
-data/
->>>>>>> e703248 (glhf)
+data/*.parquet
+model_shared/test_data/*.pt
