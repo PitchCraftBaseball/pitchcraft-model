@@ -239,8 +239,6 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     test_loader  = DataLoader(PitchSeqDS(Xc_te, Xn_te, Y_te), batch_size=model_params['batch_size'], shuffle=False)
     print("Loaded Data")
 
-    # TO DO - ADD VOCAB EXPORT 
-
     class_weights = calculate_class_weights(Y_tr, num_classes, PAD_ID, model_params['smoothing_weights'])
 
     model = PitchRNN(

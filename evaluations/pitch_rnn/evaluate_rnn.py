@@ -262,7 +262,6 @@ def evaluate_model_complete(
     }
 
 def evaluate_rnn(emb_dims, num_layers):
-    print("HLpp")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     BASE = Path(__file__).parent.parent.parent  # evaluations/pitch_rnn -> evaluations -> repo root

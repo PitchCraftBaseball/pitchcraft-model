@@ -26,7 +26,7 @@ FEATURE_SPEC = {
         "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
         "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
         "batter_sit_swing_rate", "batter_sit_whiff_rate",
-        "prev_in_zone",       # new — bool encoded as 0/1
+        "prev_in_zone",       
     ],
 }
 
@@ -80,10 +80,8 @@ def main():
         print("No features found for historical_pitches table. Exiting.")
         return
 
-    data = get_training_data(features)
+    data = get_training_data(features, True)
     print("Collected Data")
-    print(data.info())
-
 
     # Step 2: Cleaning the Data 
     # Send the data to the preprocessor to get rid of features and pitches we do not care about 
@@ -101,6 +99,7 @@ def main():
     # # Step 4: Send to RNN to be trained 
     rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS)
 
+    # Step 5: Send to be trained
     evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"])
 
 if __name__ == "__main__":
