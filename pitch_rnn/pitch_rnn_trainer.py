@@ -14,17 +14,21 @@ from torch.utils.data import DataLoader
 from model_shared.rnn_definition import PitchRNN
 from pitch_rnn.early_stopping import EarlyStopping
 from pitch_rnn.export_artifacts import *
+from model_shared.feature_engineering.location import *
 
 
 def calculate_target_variable(data: pd.DataFrame) -> pd.DataFrame:
     data["is_real_pitch"] = data["pitch_type"].notna() & (~data["pitch_type"].isin(IGNORE))
     data["target_is_real_pitch"] = data.groupby("pa_id")["is_real_pitch"].shift(-1)
-    data["y_next_pitch_type"] = data.groupby("pa_id")["pitch_type"].shift(-1)
+    data["y_next_pitch_type"]  = data.groupby("pa_id")["pitch_type"].shift(-1)
     data["y_next_pitch_group"] = data["y_next_pitch_type"].map(lambda x: pitch_to_family(x))
 
+    # new — next pitch location targets
+    data["y_next_horiz"] = data.groupby("pa_id")["horiz_bucket"].shift(-1)
+    data["y_next_vert"]  = data.groupby("pa_id")["vert_bucket"].shift(-1)
 
     data_train = data[data["target_is_real_pitch"] == True].copy()
-    data_train = data_train[data_train["y_next_pitch_group"].notna()].copy()  # filter on data_train, not data
+    data_train = data_train[data_train["y_next_pitch_group"].notna()].copy()
 
     return data_train
 
@@ -63,44 +67,52 @@ def split_by_pa_id(df: pd.DataFrame, pa_col="pa_id", ratios=(0.8, 0.2), seed: in
 
     return train_df, test_df, train_ids, test_ids
 
-def split_by_year(df: pd.DataFrame, test_year: int = 2025, pa_col: str = "pa_id") -> tuple:
+def split_by_year(df: pd.DataFrame, test_year: int = 2025) -> tuple:
     train_df = df[df["game_year"] < test_year].copy()
     test_df  = df[df["game_year"] == test_year].copy()
-
-    train_ids = set(train_df[pa_col].dropna().unique())
-    test_ids  = set(test_df[pa_col].dropna().unique())
 
     print(f"Train: {len(train_df):,} rows ({df['game_year'].min()}-{test_year - 1})")
     print(f"Test:  {len(test_df):,} rows ({test_year})")
 
-    return train_df, test_df, train_ids, test_ids
+    return train_df, test_df
 
 def make_fixed_sequences(df, feature_spec, pa_col="pa_id", max_len=8):
-    CAT_COLS = feature_spec["cat_cols"]
-    NUM_COLS = feature_spec["num_cols"]
-    X_cat, X_num, Y = [], [], []
+    CAT_COLS    = feature_spec["cat_cols"]
+    NUM_COLS    = feature_spec["num_cols"]
+    cat_id_cols = [c + "_id" for c in CAT_COLS]
 
-    for _, g in df.groupby(pa_col, sort=False):
+    df = df.copy()
+    df["_pitch_pos"] = df.groupby(pa_col).cumcount()
+    df = df[df["_pitch_pos"] < max_len]
 
-        cat = g[[c + "_id" for c in CAT_COLS]].to_numpy(np.int64)     
-        num = g[NUM_COLS].to_numpy(np.float32)                        
-        y   = g["y_id"].to_numpy(np.int64)                            
+    pa_ids        = df[pa_col].unique()
+    df["_pa_idx"] = df[pa_col].map({pa: i for i, pa in enumerate(pa_ids)})
 
-        L = min(len(g), max_len)
-        cat, num, y = cat[:L], num[:L], y[:L]
+    n_pa  = len(pa_ids)
+    n_cat = len(cat_id_cols)
+    n_num = len(NUM_COLS)
 
-        pad = max_len - L
-        if pad > 0:
-            cat = np.pad(cat, ((0,pad),(0,0)), constant_values=PAD_ID)
-            num = np.pad(num, ((0,pad),(0,0)), constant_values=0.0)
-            y   = np.pad(y,   (0,pad),         constant_values=PAD_ID)
+    X_cat   = np.full((n_pa, max_len, n_cat), PAD_ID, dtype=np.int64)
+    X_num   = np.zeros((n_pa, max_len, n_num),         dtype=np.float32)
+    Y_pitch = np.full((n_pa, max_len),         PAD_ID, dtype=np.int64)
+    Y_horiz = np.full((n_pa, max_len),         PAD_ID, dtype=np.int64)
+    Y_vert  = np.full((n_pa, max_len),         PAD_ID, dtype=np.int64)
 
-        X_cat.append(cat); X_num.append(num); Y.append(y)
+    pa_idx    = df["_pa_idx"].to_numpy(np.int64)
+    pitch_pos = df["_pitch_pos"].to_numpy(np.int64)
+
+    X_cat[pa_idx, pitch_pos]   = df[cat_id_cols].to_numpy(np.int64)
+    X_num[pa_idx, pitch_pos]   = df[NUM_COLS].to_numpy(np.float32)
+    Y_pitch[pa_idx, pitch_pos] = df["y_id"].to_numpy(np.int64)
+    Y_horiz[pa_idx, pitch_pos] = df["y_horiz_id"].to_numpy(np.int64)
+    Y_vert[pa_idx, pitch_pos]  = df["y_vert_id"].to_numpy(np.int64)
 
     return (
-        torch.tensor(np.stack(X_cat), dtype=torch.long),
-        torch.tensor(np.stack(X_num), dtype=torch.float32),
-        torch.tensor(np.stack(Y),     dtype=torch.long),
+        torch.from_numpy(X_cat),
+        torch.from_numpy(X_num),
+        torch.from_numpy(Y_pitch),
+        torch.from_numpy(Y_horiz),
+        torch.from_numpy(Y_vert),
     )
 
 def calculate_class_weights(y_train, num_classes, pad_id=0, smoothing=0.35):
@@ -145,46 +157,66 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
 
     return masks
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, early_stopping, device, num_classes):
+def train_model(
+    model, train_loader, test_loader,
+    criterion, optimizer, early_stopping,
+    device, num_classes,
+    horiz_weight: float = 0.3,
+    vert_weight:  float = 0.3,
+):
+    criterion_loc = nn.CrossEntropyLoss(ignore_index=PAD_ID)
     epochs = 20
+
     for epoch in range(epochs):
         model.train()
         train_loss = 0
-        for x_cat, x_num, y in train_loader:
-            x_cat = x_cat.to(device)
-            x_num = x_num.to(device)
-            y     = y.to(device)
-            logits = model(x_cat, x_num)  
 
-            loss = criterion(
-                logits.reshape(-1, num_classes),
-                y.reshape(-1)
+        for x_cat, x_num, y, y_horiz, y_vert in train_loader:
+            x_cat   = x_cat.to(device)
+            x_num   = x_num.to(device)
+            y       = y.to(device)
+            y_horiz = y_horiz.to(device)
+            y_vert  = y_vert.to(device)
+
+            logits_pitch, logits_horiz, logits_vert = model(x_cat, x_num)
+
+            loss_pitch = criterion(
+                logits_pitch.reshape(-1, num_classes), y.reshape(-1)
             )
+            loss_horiz = criterion_loc(
+                logits_horiz.reshape(-1, 3), y_horiz.reshape(-1)
+            )
+            loss_vert = criterion_loc(
+                logits_vert.reshape(-1, 3), y_vert.reshape(-1)
+            )
+
+            loss = loss_pitch + horiz_weight * loss_horiz + vert_weight * loss_vert
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item() * x_cat.size(0)
-        
+            train_loss += loss_pitch.item() * x_cat.size(0)
+
         train_loss /= len(train_loader.dataset)
 
         model.eval()
         test_loss = 0
         with torch.no_grad():
-            for x_cat, x_num, y in test_loader:
+            for x_cat, x_num, y, y_horiz, y_vert in test_loader:
                 x_cat = x_cat.to(device)
                 x_num = x_num.to(device)
-                y     = y.to(device)
+                y = y.to(device)
+                y_horiz = y_horiz.to(device)
+                y_vert  = y_vert.to(device)
 
-                logits = model(x_cat, x_num)  
-                
+                logits_pitch, logits_horiz, logits_vert = model(x_cat, x_num)
+
                 loss = criterion(
-                    logits.reshape(-1, num_classes),
-                    y.reshape(-1)
+                    logits_pitch.reshape(-1, num_classes), y.reshape(-1)
                 )
                 test_loss += loss.item() * x_cat.size(0)
-            
+
         test_loss /= len(test_loader.dataset)
 
         print(f'Epoch {epoch+1}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}')
@@ -203,13 +235,14 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     CAT_COLS = feature_spec["cat_cols"]
     NUM_COLS = feature_spec["num_cols"]
 
+    boundaries = compute_bucket_boundaries(data)
+    data       = add_location_targets(data, boundaries)
+    data       = add_prev_location_features(data)
+
     data_train = calculate_target_variable(data)
 
-    train_df, test_df, train_ids, test_ids = split_by_year(
-        data_train, test_year=2025
-    )   
+    train_df, test_df = split_by_year(data_train, test_year=2025)
     print("Split Training Data")
-    
 
     train_df = calculate_game_state_features(train_df)
     test_df  = calculate_game_state_features(test_df)
@@ -231,24 +264,33 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     test_enc = encode_df(test_df, feature_spec, cat_vocabs, y_vocab, scaler)
     print("Encoded Data")
 
-    Xc_tr, Xn_tr, Y_tr = make_fixed_sequences(train_enc, feature_spec, max_len=MAX_LEN)
-    Xc_te, Xn_te, Y_te = make_fixed_sequences(test_enc,  feature_spec, max_len=MAX_LEN)
+    Xc_tr, Xn_tr, Y_tr, Yh_tr, Yv_tr = make_fixed_sequences(
+        train_enc, feature_spec, max_len=MAX_LEN
+    )
+    Xc_te, Xn_te, Y_te, Yh_te, Yv_te = make_fixed_sequences(
+        test_enc, feature_spec, max_len=MAX_LEN
+    )
     print("Made Fixed Sequences")
 
-    train_loader = DataLoader(PitchSeqDS(Xc_tr, Xn_tr, Y_tr), batch_size=model_params['batch_size'], shuffle=True)
-    test_loader  = DataLoader(PitchSeqDS(Xc_te, Xn_te, Y_te), batch_size=model_params['batch_size'], shuffle=False)
+    train_loader = DataLoader(
+        PitchSeqDS(Xc_tr, Xn_tr, Y_tr, Yh_tr, Yv_tr),
+        batch_size=model_params['batch_size'], shuffle=True
+    )
+    test_loader = DataLoader(
+        PitchSeqDS(Xc_te, Xn_te, Y_te, Yh_te, Yv_te),
+        batch_size=model_params['batch_size'], shuffle=False
+    )
     print("Loaded Data")
 
     class_weights = calculate_class_weights(Y_tr, num_classes, PAD_ID, model_params['smoothing_weights'])
 
     model = PitchRNN(
-        cat_vocab_sizes=cat_vocab_sizes,
-        num_features=len(NUM_COLS),
-        emb_dims=custom_emb_dims,
-        num_classes=num_classes,
-        num_layers=model_params['model_layers']
+        cat_vocab_sizes = cat_vocab_sizes,
+        num_features    = len(NUM_COLS),
+        emb_dims        = custom_emb_dims,
+        num_classes     = num_classes,
+        num_layers      = model_params['model_layers']
     )
-
     model = model.to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_ID, weight=class_weights.to(device))
@@ -259,13 +301,4 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
 
     export_model(model)
     export_vocabs(cat_vocabs, y_vocab, feature_spec)
-    export_test_tensors(Xc_te, Xn_te, Y_te)
-
-
-
-
-
-    
-
-
-    
+    export_test_tensors(Xc_te, Xn_te, Y_te, Yh_te, Yv_te)

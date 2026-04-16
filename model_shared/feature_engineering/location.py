@@ -60,7 +60,7 @@ def _get_horiz_bucket(
     boundaries: dict,
 ) -> int:
     """
-    Returns horizontal bucket from the batter's perspective.
+    Returns horizontal bucket from the catcher's perspective.
         0 = away
         1 = middle
         2 = in
@@ -118,29 +118,42 @@ def _get_zone(
 
 def add_location_targets(df: pd.DataFrame, boundaries: dict) -> pd.DataFrame:
     out = df.copy()
-    
-    results = out.apply(
-        lambda r: get_pitch_location_buckets(
-            plate_x    = r["plate_x"],
-            plate_z    = r["plate_z"],
-            sz_top     = r["sz_top"],
-            sz_bot     = r["sz_bot"],
-            stand      = r["stand"],
-            boundaries = boundaries,
-        ),
-        axis=1
+
+    missing = (
+        out["plate_x"].isna() |
+        out["plate_z"].isna() |
+        out["sz_top"].isna()  |
+        out["sz_bot"].isna()
     )
-    
-    out["horiz_bucket"] = results.map(
-        lambda x: x["horiz_bucket"] if x is not None else np.nan
-    )
-    out["vert_bucket"]  = results.map(
-        lambda x: x["vert_bucket"]  if x is not None else np.nan
-    )
-    out["in_zone"]      = results.map(
-        lambda x: x["in_zone"]      if x is not None else np.nan
-    )
-    
+
+    # horiz bucket
+    x = np.where(out["stand"] == "R", out["plate_x"], -out["plate_x"])
+    out["horiz_bucket"] = np.select(
+        [x < boundaries["x_low"], x > boundaries["x_high"]],
+        [0, 2],
+        default=1
+    ).astype(float)  # float allows NaN
+
+    # vert bucket
+    zone_h     = out["sz_top"] - out["sz_bot"]
+    low_thresh = out["sz_bot"] + zone_h * (1/3)
+    hi_thresh  = out["sz_bot"] + zone_h * (2/3)
+    out["vert_bucket"] = np.select(
+        [out["plate_z"] < low_thresh, out["plate_z"] > hi_thresh],
+        [0, 2],
+        default=1
+    ).astype(float)  # float allows NaN
+
+    # in_zone — cast to float before assignment so NaN is valid
+    out["in_zone"] = (
+        (out["plate_x"].abs() <= 0.83) &
+        (out["plate_z"] >= out["sz_bot"]) &
+        (out["plate_z"] <= out["sz_top"])
+    ).astype(float)  # float allows NaN
+
+    # null out rows with missing location data
+    out.loc[missing, ["horiz_bucket", "vert_bucket", "in_zone"]] = np.nan
+
     return out
 
 def add_prev_location_features(df: pd.DataFrame) -> pd.DataFrame:

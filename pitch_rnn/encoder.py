@@ -19,6 +19,10 @@ def encode_df(df, feature_spec, cat_vocabs, y_vocab, scaler):
     for c in CAT_COLS:
         out[c + "_id"] = encode(out[c], cat_vocabs[c])
     out["y_id"] = encode(out[TARGET_COL], y_vocab)
+
+    out["y_horiz_id"] = out["y_next_horiz"].fillna(PAD_ID).astype(np.int64)
+    out["y_vert_id"]  = out["y_next_vert"].fillna(PAD_ID).astype(np.int64)
+
     for c in NUM_COLS:
         out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).astype(np.float32)
     out[NUM_COLS] = scaler.transform(out[NUM_COLS])

@@ -13,7 +13,7 @@ from model_training_notebooks.src.setup_data import validate_feature_list_file
 
 # Eventually this will come from a config file
 FEATURE_SPEC = {
-    "target": "y_next_pitch_group",
+    "target": "y_next_pitch_type",
     "cat_cols": [
         "pitcher", "batter", "stand", "p_throws", "inning_topbot",
         "count_state", "prev_pitch_type", "count_situation",
@@ -44,7 +44,7 @@ EMB_DIMS = {
 }
 
 MODEL_HYPERPARAMETERS = {
-    'smoothing_weights': 0.7,
+    'smoothing_weights': 0.6,
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
@@ -60,7 +60,7 @@ def get_training_data(features: list[str], force_refresh: bool = False) -> pd.Da
         return load_training_data()
     
     print("No cache found, querying database...")
-    df = query_historical_pitches_by_year("historical_pitches", features, start_year=2015, end_year=2025)
+    df = query_historical_pitches_by_year("historical_pitches", features, start_year=2021, end_year=2025)
     save_training_data(df)
     return df
 
@@ -80,17 +80,13 @@ def main():
         print("No features found for historical_pitches table. Exiting.")
         return
 
-    data = get_training_data(features, True)
+    data = get_training_data(features)
     print("Collected Data")
 
     # Step 2: Cleaning the Data 
     # Send the data to the preprocessor to get rid of features and pitches we do not care about 
     data = clean_data(data)
     print("Cleaned Data")
-
-    boundaries = compute_bucket_boundaries(data)
-    data       = add_location_targets(data, boundaries)
-    data       = add_prev_location_features(data)
 
     # # Step 3: Add Features from Feature Repo
     data = get_rnn_features(data)
@@ -100,8 +96,8 @@ def main():
     rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS)
 
     # Step 5: Send to be trained
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"])
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
 
 if __name__ == "__main__":
-    main()
-    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"])
+    #main()
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
