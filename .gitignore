@@ -15,6 +15,7 @@ model_training_notebooks/*.csv
 
 # AI 
 *.codex 
+*.claude
 
 model-training-notebooks/*.csv
 data/*.parquet

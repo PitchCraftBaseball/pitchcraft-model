@@ -8,7 +8,10 @@
       "p_throws",
       "inning_topbot",
       "count_state",
-      "prev_pitch_type"
+      "prev_pitch_type",
+      "count_situation",
+      "prev_horiz_bucket",
+      "prev_vert_bucket"
     ],
     "num_cols": [
       "balls",
@@ -22,18 +25,21 @@
     ],
     "bool_cols": []
   },
-  "cat_vocabs": {
-    "pitcher": {},
-    "batter": {},
-    "stand": {},
-    "p_throws": {},
-    "inning_topbot": {},
-    "count_state": {},
-    "prev_pitch_type": {}
-  },
-  "y_vocab": {},
   "max_len": 8,
   "pad_id": 0,
-  "emb_dim": 16,
-  "hidden": 128
+  "emb_dims": {
+    "pitcher": 32,
+    "batter": 32,
+    "stand": 4,
+    "p_throws": 4,
+    "inning_topbot": 4,
+    "count_state": 8,
+    "prev_pitch_type": 16,
+    "count_situation": 4,
+    "prev_horiz_bucket": 4,
+    "prev_vert_bucket": 4
+  },
+  "hidden": 128,
+  "num_layers": 2,
+  "num_location_classes": 3
 }

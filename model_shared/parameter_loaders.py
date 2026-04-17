@@ -1,17 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Dict
 
-# TODO: MOVE THESE GLOBALS TO A CONFIG FILE?
-RNN_VERSION = "v0_1"
-VOCAB_DIR = ""
 TRAINED_PARAMETERS_DIR = Path(__file__).resolve().parent / "trained-parameters"
 VOCAB_DIR = Path(__file__).resolve().parent / "vocab"
 
 
-# all loader functions
 def latest_vocab_csv() -> Path:
     # Pick the most recent vocab file based on the YYYYMMDD suffix in the filename.
     vocab_files = sorted(VOCAB_DIR.glob("rnn_vocab_*.csv"))
@@ -20,8 +17,15 @@ def latest_vocab_csv() -> Path:
     return vocab_files[-1]
 
 
+def latest_vocab_json() -> Path:
+    vocab_files = sorted(VOCAB_DIR.glob("rnn_vocab_*.json"))
+    if not vocab_files:
+        raise RuntimeError("No JSON vocab files found in vocab/. Run training to generate rnn_vocab_YYYYMMDD.json.")
+    return vocab_files[-1]
+
+
 def latest_parameters() -> Path:
-    parameters_files = sorted(TRAINED_PARAMETERS_DIR.glob(f"simple_rnn_{RNN_VERSION}_*.pt"))
+    parameters_files = sorted(TRAINED_PARAMETERS_DIR.glob("pitch_rnn_*.pt"))
     if not parameters_files:
         raise RuntimeError("No trained parameters found. Run training once and commit parameters file.")
     return parameters_files[-1]
@@ -42,4 +46,14 @@ def load_vocabs_from_csv(vocab_path: Path) -> tuple[Dict[str, Dict[str, int]], D
                 cat_vocabs.setdefault(feature, {})[str(value)] = idx
             elif kind == "target":
                 y_vocab[str(value)] = idx
+    return cat_vocabs, y_vocab
+
+
+def load_vocabs_from_json(vocab_path: Path) -> tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+    data = json.loads(vocab_path.read_text())
+    cat_vocabs: Dict[str, Dict[str, int]] = {
+        col: {str(k): int(v) for k, v in mapping.items()}
+        for col, mapping in data["cat_vocabs"].items()
+    }
+    y_vocab: Dict[str, int] = {str(k): int(v) for k, v in data["y_vocab"].items()}
     return cat_vocabs, y_vocab
