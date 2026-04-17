@@ -8,7 +8,7 @@ from pitch_rnn.pitch_rnn_trainer import rnn_training_handler
 from evaluations.pitch_rnn.evaluate_rnn import evaluate_rnn
 from model_shared.db import query_historical_pitches_by_year 
 from model_shared.parquet import *
-from model_training_notebooks.src.setup_data import validate_feature_list_file
+from pitch_rnn.setup_data import validate_feature_list_file
 
 
 # Eventually this will come from a config file
