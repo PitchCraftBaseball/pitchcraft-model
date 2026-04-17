@@ -22,19 +22,18 @@ from .util.feature_db_accessor import fetch_player_features
 class Artifacts:
     def __init__(self, path: Path) -> None:
         data = json.loads(path.read_text())
-        self.feature_spec = data["feature_spec"]
-        self.bool_cols = list(data.get("bool_cols", []))
         self.max_len = int(data.get("max_len", 8))
         self.pad_id = int(data.get("pad_id", 0))
         self.emb_dims: Dict[str, int] = dict(data["emb_dims"])
         self.hidden = int(data.get("hidden", 128))
         self.num_layers = int(data.get("num_layers", 1))
         self.num_location_classes = int(data.get("num_location_classes", 3))
-        self.cat_cols = list(self.feature_spec["cat_cols"])
-        self.num_cols = list(self.feature_spec["num_cols"])
 
         vocab_path = latest_vocab_json()
-        self.cat_vocabs, self.y_vocab = load_vocabs_from_json(vocab_path)
+        self.cat_vocabs, self.y_vocab, feature_spec = load_vocabs_from_json(vocab_path)
+        self.cat_cols = list(feature_spec["cat_cols"])
+        self.num_cols = list(feature_spec["num_cols"])
+        self.bool_cols = list(feature_spec.get("bool_cols", []))
 
         self.id_to_pitch = {int(v): k for k, v in self.y_vocab.items()}
 

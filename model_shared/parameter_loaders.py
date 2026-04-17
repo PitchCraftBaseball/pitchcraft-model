@@ -49,11 +49,14 @@ def load_vocabs_from_csv(vocab_path: Path) -> tuple[Dict[str, Dict[str, int]], D
     return cat_vocabs, y_vocab
 
 
-def load_vocabs_from_json(vocab_path: Path) -> tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+def load_vocabs_from_json(
+    vocab_path: Path,
+) -> tuple[Dict[str, Dict[str, int]], Dict[str, int], Dict]:
     data = json.loads(vocab_path.read_text())
     cat_vocabs: Dict[str, Dict[str, int]] = {
         col: {str(k): int(v) for k, v in mapping.items()}
         for col, mapping in data["cat_vocabs"].items()
     }
     y_vocab: Dict[str, int] = {str(k): int(v) for k, v in data["y_vocab"].items()}
-    return cat_vocabs, y_vocab
+    feature_spec: Dict = data.get("feature_spec", {})
+    return cat_vocabs, y_vocab, feature_spec

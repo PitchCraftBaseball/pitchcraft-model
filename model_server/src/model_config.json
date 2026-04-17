@@ -1,30 +1,4 @@
 {
-  "feature_spec": {
-    "target": "y_next_pitch_type",
-    "cat_cols": [
-      "pitcher",
-      "batter",
-      "stand",
-      "p_throws",
-      "inning_topbot",
-      "count_state",
-      "prev_pitch_type",
-      "count_situation",
-      "prev_horiz_bucket",
-      "prev_vert_bucket"
-    ],
-    "num_cols": [
-      "balls",
-      "strikes",
-      "outs_when_up",
-      "inning",
-      "score_diff_bat",
-      "on_1b",
-      "on_2b",
-      "on_3b"
-    ],
-    "bool_cols": []
-  },
   "max_len": 8,
   "pad_id": 0,
   "emb_dims": {
