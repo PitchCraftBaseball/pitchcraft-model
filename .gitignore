@@ -15,3 +15,9 @@ model_training_notebooks/*.csv
 
 # AI 
 *.codex 
+*.claude
+
+model-training-notebooks/*.csv
+data/*.parquet
+model_shared/test_data/*.pt
+evaluations/pitch_rnn/eval_output/*

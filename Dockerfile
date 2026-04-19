@@ -15,5 +15,4 @@ COPY certs ./certs
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["uvicorn", "model_server.src.api:app", "--host", "0.0.0.0", "--port", "8000"]

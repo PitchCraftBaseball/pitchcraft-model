@@ -18,6 +18,10 @@ import csv
 from pathlib import Path
 import sys
 
+COLUMN_TABLE_OVERRIDES = {
+    "sz_top": "historical_pitches",
+    "sz_bot": "historical_pitches",
+}
 
 from model_shared.db import find_table_for_column, query_table_for_features
 
@@ -36,7 +40,11 @@ def validate_feature_list_file(filename: str):
                 # print(f"{feature} is currently disabled")
                 continue
             feature = feature.strip()
-            table_name = find_table_for_column("public", feature)
+            if feature in COLUMN_TABLE_OVERRIDES:
+                table_name = COLUMN_TABLE_OVERRIDES[feature]
+            else:
+                table_name = find_table_for_column("public", feature)
+            
             if table_name is None:
                 print(f"Couldn't find a table that contained the feature: {feature}")
                 return None
