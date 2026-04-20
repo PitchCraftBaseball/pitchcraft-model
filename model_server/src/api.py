@@ -27,7 +27,6 @@ class Artifacts:
         self.emb_dims: Dict[str, int] = dict(data["emb_dims"])
         self.hidden = int(data.get("hidden", 128))
         self.num_layers = int(data.get("num_layers", 1))
-        self.num_location_classes = int(data.get("num_location_classes", 3))
 
         vocab_path = latest_vocab_json()
         self.cat_vocabs, self.y_vocab, feature_spec = load_vocabs_from_json(vocab_path)
@@ -81,7 +80,6 @@ def create_app() -> FastAPI:
         emb_dims=artifacts.emb_dims,
         hidden=artifacts.hidden,
         num_classes=artifacts.num_classes(),
-        num_location_classes=artifacts.num_location_classes,
         num_layers=artifacts.num_layers,
         pad_id=artifacts.pad_id,
     )
