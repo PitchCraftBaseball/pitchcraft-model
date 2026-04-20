@@ -47,7 +47,7 @@ def export_vocabs(cat_vocabs: dict, y_vocab: dict, feature_spec: dict, out_dir: 
     print(f"Vocabs saved {save_path}")
     return save_path
 
-def export_test_tensors(Xc_te, Xn_te, Y_te, Yh_te, Yv_te, out_dir=None, filename=None):
+def export_test_tensors(Xc_te, Xn_te, Y_te, out_dir=None, filename=None):
     if out_dir is None:
         out_dir = Path(__file__).parent.parent / "model_shared" / "test_data"
     
@@ -62,8 +62,6 @@ def export_test_tensors(Xc_te, Xn_te, Y_te, Yh_te, Yv_te, out_dir=None, filename
         "Xc":     Xc_te,
         "Xn":     Xn_te,
         "Y":      Y_te,
-        "Y_horiz": Yh_te,
-        "Y_vert":  Yv_te,
     }, save_path)
     print(f"Test tensors saved {save_path}")
     return save_path
