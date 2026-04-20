@@ -17,8 +17,6 @@ FEATURE_SPEC = {
     "cat_cols": [
         "pitcher", "batter", "stand", "p_throws", "inning_topbot",
         "count_state", "prev_pitch_type", "count_situation",
-        "prev_horiz_bucket", 
-        "prev_vert_bucket",  
     ],
     "num_cols": [
         "balls", "strikes", "outs_when_up", "inning", "bat_score_diff",
@@ -26,7 +24,6 @@ FEATURE_SPEC = {
         "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
         "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
         "batter_sit_swing_rate", "batter_sit_whiff_rate",
-        "prev_in_zone",       
     ],
 }
 
@@ -39,8 +36,6 @@ EMB_DIMS = {
     "count_state": 8,
     "prev_pitch_type": 16,
     "count_situation": 4,
-    "prev_horiz_bucket": 4,
-    "prev_vert_bucket": 4,
 }
 
 MODEL_HYPERPARAMETERS = {
@@ -99,5 +94,5 @@ def main():
     evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
 
 if __name__ == "__main__":
-    #main()
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
+    main()
+    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
