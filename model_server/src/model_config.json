@@ -9,9 +9,7 @@
     "inning_topbot": 4,
     "count_state": 8,
     "prev_pitch_type": 16,
-    "count_situation": 4,
-    "prev_horiz_bucket": 4,
-    "prev_vert_bucket": 4
+    "count_situation": 4
   },
   "hidden": 128,
   "num_layers": 2,
