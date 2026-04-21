@@ -5,36 +5,30 @@ returns pitch-type probabilities for each pitch in an input sequence.
 
 ## Files
 
-- `api.py`: FastAPI app for inference.
-- `build_model_config.py`: Writes a template `model_config.json` (feature spec + hyperparams).
-- `model_config.json`: Feature spec + model hyperparams (vocabs are loaded from `vocab/`).
-- `vocab/`: Date-stamped vocab exports from the training notebook (`rnn_vocab_YYYYMMDD.csv`).
-
-## Updating Model Training 
-If you are updating the model training hyperparameters, please update `build_model_config.py`. This was slight oversight when coming up with this design; in the future, I would like to refactor part of the training notebooks to just handle exporting the model config on its own.
+- `src/api.py`: FastAPI app for inference.
+- `src/model_config.json`: Model architecture hyperparameters (emb_dims, hidden, num_layers, etc.). Feature spec is loaded automatically from the latest `model_shared/vocab/rnn_vocab_*.json` at startup.
 
 ## Setup
+
 1) Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2) Create config (feature spec + hyperparams):
-```bash
-python ./config-generators/build_model_config.py
-```
+2) Ensure a trained checkpoint and vocab export exist:
+- `model_shared/trained-parameters/pitch_rnn_YYYYMMDD.pt`
+- `model_shared/vocab/rnn_vocab_YYYYMMDD.json`
 
-3) Generate vocab exports from the training notebook:
-- `vocab/rnn_vocab_YYYYMMDD.csv` (categorical + target vocabs)
+The API picks up the most recent file of each at startup automatically.
 
 ## Run the API
 
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
+uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000
 ```
 
-If you run from the project root, you can also run 
-```bash 
+Or from the project root:
+```bash
 ./start_server
 ```
 
@@ -50,19 +44,29 @@ curl -s -X POST http://localhost:8000/predict \
       "inning_topbot": "Top",
       "count_state": "1-1",
       "prev_pitch_type": "FF",
+      "count_situation": "even",
+      "prev_horiz_bucket": "1",
+      "prev_vert_bucket": "1",
       "balls": 1,
       "strikes": 1,
       "outs_when_up": 1,
       "inning": 3,
-      "score_diff_bat": 0,
+      "bat_score_diff": 0,
       "on_1b": 0,
       "on_2b": 1,
-      "on_3b": 0
+      "on_3b": 0,
+      "prev_in_zone": 1,
+      "pitcher_sit_fb_rate": 0.52,
+      "pitcher_sit_br_rate": 0.31,
+      "pitcher_sit_os_rate": 0.17,
+      "pitcher_sit_whiff_rate": 0.28,
+      "batter_sit_swing_rate": 0.45,
+      "batter_sit_whiff_rate": 0.22
     },
     "batter_features": ["stand"],
     "pitcher_features": ["p_throws"]
   }'
 ```
 
-The response includes `pitch_one` ... `pitch_four`, each with pitch-type
-probabilities.
+The response includes `pitch_one` through `pitch_four`, each a map of pitch type
+to probability.

@@ -28,14 +28,5 @@ bat_score
 fld_score
 home_score_diff
 bat_score_diff
-# is_swing
-# is_whiff
-# is_called_strike
-# is_ball
-# in_zone
-# out_zone
-# count_state
-# score_diff_bat
-# pa_id
-# prev_pitch_type
-# seq_len
+plate_x
+plate_z
