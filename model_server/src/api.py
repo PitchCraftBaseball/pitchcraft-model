@@ -2,21 +2,40 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .util.pitch_state_builder import build_pitch_state_from_features
-from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
+from model_shared.feature_engineering.feature_calculator import count_situation
 from model_shared.parameter_loaders import (
     latest_parameters,
     latest_vocab_json,
     load_vocabs_from_json,
 )
 from model_shared.rnn_definition import PitchRNN
-from .util.feature_db_accessor import fetch_player_features
+
+from .util.feature_store import FeatureStore, SqlHistoricalPitchesFeatureStore
+from .util.pitch_state_builder import (
+    MissingFeaturesError,
+    build_pitch_state_from_features,
+)
+from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
+from .util.players_accessor import fetch_handedness
+
+
+REQUIRED_STATE_KEYS = [
+    "balls",
+    "strikes",
+    "outs_when_up",
+    "inning",
+    "inning_topbot",
+    "bat_score_diff",
+    "on_1b",
+    "on_2b",
+    "on_3b",
+]
 
 
 class Artifacts:
@@ -51,14 +70,12 @@ class PredictRequest(BaseModel):
     pitcher: str = Field(..., min_length=1)
     batter: str = Field(..., min_length=1)
     state_features: Dict[str, Any] = Field(default_factory=dict)
-    batter_features: List[str] = Field(default_factory=list)
-    pitcher_features: List[str] = Field(default_factory=list)
 
 
 PredictResponse = Dict[str, Dict[str, float]]
 
 
-def create_app() -> FastAPI:
+def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
     app = FastAPI(title="Pitch RNN Inference API")
 
     artifacts_path = Path(__file__).resolve().parent / "model_config.json"
@@ -86,42 +103,78 @@ def create_app() -> FastAPI:
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
 
+    store: FeatureStore = feature_store or SqlHistoricalPitchesFeatureStore()
+
     @app.get("/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/predict", response_model=PredictResponse)
     def predict(req: PredictRequest) -> PredictResponse:
-        batter_features = fetch_player_features(
-            req.batter,
-            req.batter_features,
-            entity="batter",
-            is_batter=True,
-        )
-        pitcher_features = fetch_player_features(
-            req.pitcher,
-            req.pitcher_features,
-            entity="pitcher",
-            is_batter=False,
-        )
+        missing = [k for k in REQUIRED_STATE_KEYS if k not in req.state_features]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "missing_features": missing,
+                    "message": "state_features is missing required keys.",
+                },
+            )
 
-        states = [
-            build_pitch_state_from_features(
+        stand = fetch_handedness(req.batter, is_batter=True)
+        if stand is None:
+            raise HTTPException(
+                status_code=404, detail=f"batter {req.batter} not found"
+            )
+        p_throws = fetch_handedness(req.pitcher, is_batter=False)
+        if p_throws is None:
+            raise HTTPException(
+                status_code=404, detail=f"pitcher {req.pitcher} not found"
+            )
+
+        balls = int(req.state_features["balls"])
+        strikes = int(req.state_features["strikes"])
+        situation = count_situation(balls, strikes)
+
+        pitcher_splits = store.get_pitcher_situation_splits(req.pitcher, situation)
+        batter_splits = store.get_batter_situation_splits(req.batter, situation)
+
+        enriched_state = {
+            **req.state_features,
+            "stand": stand,
+            "p_throws": p_throws,
+            # TODO: Need to integrate transition model. Until then every
+            # request is treated as the start of a new sequence.
+            "prev_pitch_type": "START",
+        }
+
+        required_cols = list(artifacts.cat_cols) + list(artifacts.num_cols)
+        try:
+            state = build_pitch_state_from_features(
                 req.pitcher,
                 req.batter,
-                req.state_features,
-                batter_features,
-                pitcher_features,
+                enriched_state,
+                batter_splits,
+                pitcher_splits,
+                required_cols=required_cols,
             )
-        ]
+        except MissingFeaturesError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "missing_features": exc.missing,
+                    "message": "Request is missing features required by the loaded model.",
+                },
+            )
 
-        x_cat, x_num, seq_len = build_tensors(states, artifacts)
+        x_cat, x_num, seq_len = build_tensors([state], artifacts)
         with torch.no_grad():
-            logits_pitch, _logits_horiz, _logits_vert = model(x_cat, x_num)
-            # TODO: expose location predictions (horiz/vert) in a future API version
+            logits_pitch = model(x_cat, x_num)
             probs = torch.softmax(logits_pitch, dim=-1)[0]
 
-        return build_pitch_probabilities(probs, artifacts, seq_len)
+        return build_pitch_probabilities(
+            probs, artifacts, seq_len, pitch_keys=["pitch_one"]
+        )
 
     return app
 

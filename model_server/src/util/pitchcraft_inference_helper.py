@@ -50,9 +50,9 @@ def build_tensors(
         s = states[i]
         for j, col in enumerate(artifacts.cat_cols):
             vocab = artifacts.cat_vocabs[col]
-            x_cat[i, j] = _encode_cat(getattr(s, col), vocab, artifacts.pad_id)
+            x_cat[i, j] = _encode_cat(getattr(s, col, None), vocab, artifacts.pad_id)
         for j, col in enumerate(artifacts.num_cols):
-            x_num[i, j] = _encode_num(getattr(s, col))
+            x_num[i, j] = _encode_num(getattr(s, col, None))
 
     x_cat_t = torch.tensor(x_cat, dtype=torch.long).unsqueeze(0)
     x_num_t = torch.tensor(x_num, dtype=torch.float32).unsqueeze(0)

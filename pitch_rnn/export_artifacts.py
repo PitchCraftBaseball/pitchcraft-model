@@ -21,6 +21,14 @@ def export_model(model, out_dir: str = None, filename: str = None) -> Path:
 
 
 def export_vocabs(cat_vocabs: dict, y_vocab: dict, feature_spec: dict, out_dir: str = None, filename: str = None) -> Path:
+    cat_cols = feature_spec.get("cat_cols", [])
+    missing_vocabs = [col for col in cat_cols if col not in cat_vocabs]
+    if missing_vocabs:
+        raise ValueError(
+            f"feature_spec declares cat_cols without a matching vocab: {missing_vocabs}. "
+            "Refusing to export a vocab file that inference would load with missing keys."
+        )
+
     if out_dir is None:
         out_dir = Path(__file__).parent.parent / "model_shared" / "vocab"
 
