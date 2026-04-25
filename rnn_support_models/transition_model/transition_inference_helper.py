@@ -193,30 +193,30 @@ def predict_pitch_transition_outcome(
     return probs
 
 # test
-context = {
-    'balls': 0,
-    'strikes': 1,
-    'stand': 'L',
-    'p_throws': 'R',
-    'inning': 4,
-    'inning_topbot': 'Top',
-    'bat_score': 2,
-    'fld_score': 1,
-    'runner_on_1b': 1,
-    'runner_on_2b': 0,
-    'runner_on_3b': 0,
-    'outs_when_up': 1,
-    'prev_pitch_type': 'NONE',
-    'prev_zone': 0
-}
+# context = {
+#     'balls': 0,
+#     'strikes': 1,
+#     'stand': 'L',
+#     'p_throws': 'R',
+#     'inning': 4,
+#     'inning_topbot': 'Top',
+#     'bat_score': 2,
+#     'fld_score': 1,
+#     'runner_on_1b': 1,
+#     'runner_on_2b': 0,
+#     'runner_on_3b': 0,
+#     'outs_when_up': 1,
+#     'prev_pitch_type': 'NONE',
+#     'prev_zone': 0
+# }
 
-prediction = predict_pitch_transition_outcome(
-    batter_id='575929', # Willson Contreras, decently high swing rates outside strikezone (15.3 |   21.9 |   32.7 |   38.4)
-    pitcher_id='554430', # Zack Wheeler
-    pitch_type='FF',
-    zone=14,
-    year=2025,
-    game_context=context
-)
+# prediction = predict_pitch_transition_outcome(
+#     batter_id='575929', # Willson Contreras, decently high swing rates outside strikezone (15.3 |   21.9 |   32.7 |   38.4)
+#     pitcher_id='554430', # Zack Wheeler
+#     pitch_type='FF',
+#     zone=14,
+#     year=2025,
+#     game_context=context
+# )
 
-print(prediction)
+# print(prediction)
