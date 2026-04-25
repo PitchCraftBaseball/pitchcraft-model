@@ -110,12 +110,13 @@ def fetch_player_out_type_historical_features(
         _log_player_feature_retrieval(player_id, columns, entity, features)
         return features
 
-def fetch_player_out_type_zone_features(
+def fetch_player_zone_features(
         player_id: str,
         year: int,
         entity: str,
         is_batter: bool,
-) -> Dict [str, Optional[str]]:
+        metrics: list[str],
+) -> Dict [str, Optional[float]]:
     query = """
         SELECT
             player_id,
@@ -135,17 +136,14 @@ def fetch_player_out_type_zone_features(
             zone13,
             zone14
         FROM zone_metrics
-        WHERE player_id = %s AND year = %s AND position = %s
-            AND metric IN ('batting_average', 'average_exit_velocity', 
-                          'average_launch_angle', 'contact_batting_average',
-                          'hard_hit_bip_percentage', 'expected_batting_average',
-                          'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
-                          'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage'
-                          )
+        WHERE player_id = %s 
+            AND year = %s 
+            AND position = %s
+            AND metric = ANY(%s::zone_metric_type[])
     """
     
     with get_read_cursor() as cursor:
-        cursor.execute(query, (player_id, year, "B" if is_batter else "P"))
+        cursor.execute(query, (player_id, year, "B" if is_batter else "P", metrics))
         rows = cursor.fetchall()
 
         if not rows: 
@@ -164,6 +162,55 @@ def fetch_player_out_type_zone_features(
 
         _log_player_feature_retrieval(player_id, list(features.keys()), entity, features)
         return features
+    
+def fetch_player_transition_historical_features(
+        player_id: str,
+        year: int,
+        pitch_type: str,
+        entity: str,
+        is_batter: bool
+) -> Dict[str, Optional[str]]:
+    query = """
+        SELECT
+            bb.player_id,
+            bb.position,
+            pd.whiff_percentage,
+            pd.chase_percentage,
+            pd.zone_percentage,
+            pd.zone_swing_percentage,
+            pd.zone_contact_percentage,
+            pd.first_pitch_swing_percentage,
+            pd.meatball_swing_percentage,
+            pt.pitch_type,
+            pt.pitch_count,
+            pt.strikeouts,
+            pt.batted_ball_events,
+            pt.putaway_percentage,
+            pt.whiff_percentage AS pitch_whiff_percentage
+        FROM batted_ball_profile bb 
+        JOIN plate_discipline pd
+            ON bb.player_id = pd.player_id
+            AND bb.position = pd.position
+            AND bb.year = pd.year
+        JOIN pitch_tracking pt
+            ON bb.player_id = pt.player_id
+            AND bb.position = pt.position
+            AND bb.year = pt.year
+            AND pt.pitch_type = %s
+        WHERE bb.player_id = %s AND bb.year = %s AND bb.position = %s;
+    """
+
+    with get_read_cursor() as cursor:
+        cursor.execute(query, (pitch_type, player_id, year, "B" if is_batter else "P"))
+        row = cursor.fetchone()
+
+        if not row: 
+            return {}
+        
+        columns = [desc[0] for desc in cursor.description]
+        features = dict(zip(columns, row))
+        _log_player_feature_retrieval(player_id, columns, entity, features)
+        return features
 
 def _log_player_feature_retrieval(player_id, feature_names, entity, features):
     debug_dir = Path(
@@ -179,3 +226,4 @@ def _log_player_feature_retrieval(player_id, feature_names, entity, features):
         handle.write(f"requested_features={feature_names}\n")
         handle.write(f"retrieved_features={features}\n")
         handle.write("---\n")
+
