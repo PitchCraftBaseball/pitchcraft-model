@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -23,6 +25,9 @@ from .util.pitch_state_builder import (
 )
 from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
 from .util.players_accessor import fetch_handedness
+
+
+logger = logging.getLogger(__name__)
 
 
 REQUIRED_STATE_KEYS = [
@@ -111,6 +116,9 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
 
     @app.post("/predict", response_model=PredictResponse)
     def predict(req: PredictRequest) -> PredictResponse:
+        start = time.perf_counter()
+        logger.info("predict request: pitcher=%s batter=%s", req.pitcher, req.batter)
+
         missing = [k for k in REQUIRED_STATE_KEYS if k not in req.state_features]
         if missing:
             raise HTTPException(
@@ -172,9 +180,17 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
             logits_pitch = model(x_cat, x_num)
             probs = torch.softmax(logits_pitch, dim=-1)[0]
 
-        return build_pitch_probabilities(
+        response = build_pitch_probabilities(
             probs, artifacts, seq_len, pitch_keys=["pitch_one"]
         )
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "predict response: pitcher=%s batter=%s elapsed_ms=%.2f",
+            req.pitcher,
+            req.batter,
+            elapsed_ms,
+        )
+        return response
 
     return app
 
