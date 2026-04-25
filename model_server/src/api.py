@@ -121,13 +121,13 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
-        stand = fetch_handedness(req.batter, is_batter=True)
-        if stand is None:
+        batter_side = fetch_handedness(req.batter, is_batter=True)
+        if batter_side is None:
             raise HTTPException(
                 status_code=404, detail=f"batter {req.batter} not found"
             )
-        p_throws = fetch_handedness(req.pitcher, is_batter=False)
-        if p_throws is None:
+        pitcher_arm = fetch_handedness(req.pitcher, is_batter=False)
+        if pitcher_arm is None:
             raise HTTPException(
                 status_code=404, detail=f"pitcher {req.pitcher} not found"
             )
@@ -141,8 +141,8 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
 
         enriched_state = {
             **req.state_features,
-            "stand": stand,
-            "p_throws": p_throws,
+            "stand": batter_side,
+            "p_throws": pitcher_arm,
             # TODO: Need to integrate transition model. Until then every
             # request is treated as the start of a new sequence.
             "prev_pitch_type": "START",

@@ -35,37 +35,23 @@ Or from the project root:
 ## Test Run
 
 ```bash
-curl -s -X POST http://localhost:8000/predict \
+curl -s -X POST http://localhost:8001/predict \
   -H 'Content-Type: application/json' \
   -d '{
-    "pitcher": "642121",
-    "batter": "595777",
-    "state_features": {
-      "inning_topbot": "Top",
-      "count_state": "1-1",
-      "prev_pitch_type": "FF",
-      "count_situation": "even",
-      "prev_horiz_bucket": "1",
-      "prev_vert_bucket": "1",
-      "balls": 1,
-      "strikes": 1,
-      "outs_when_up": 1,
-      "inning": 3,
-      "bat_score_diff": 0,
-      "on_1b": 0,
-      "on_2b": 1,
-      "on_3b": 0,
-      "prev_in_zone": 1,
-      "pitcher_sit_fb_rate": 0.52,
-      "pitcher_sit_br_rate": 0.31,
-      "pitcher_sit_os_rate": 0.17,
-      "pitcher_sit_whiff_rate": 0.28,
-      "batter_sit_swing_rate": 0.45,
-      "batter_sit_whiff_rate": 0.22
-    },
-    "batter_features": ["stand"],
-    "pitcher_features": ["p_throws"]
-  }'
+      "pitcher": "668933",
+      "batter":  "695657",
+      "state_features": {
+        "balls": 1,
+        "strikes": 2,
+        "outs_when_up": 1,
+        "inning": 3,
+        "inning_topbot": "Top",
+        "bat_score_diff": -2,
+        "on_1b": false,
+        "on_2b": false,
+        "on_3b": true
+      }
+    }'
 ```
 
 The response includes `pitch_one` through `pitch_four`, each a map of pitch type

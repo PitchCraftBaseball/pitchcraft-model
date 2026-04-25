@@ -6,7 +6,7 @@ from model_shared.db import get_read_cursor
 
 
 def fetch_handedness(player_id: str, *, is_batter: bool) -> Optional[str]:
-    column = "stand" if is_batter else "p_throws"
+    column = "batting_side" if is_batter else "throwing_arm"
     with get_read_cursor() as cursor:
         cursor.execute(
             f"SELECT {column} FROM players WHERE id = %s LIMIT 1",
