@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict
 import joblib
 import pandas as pd
 from model_server.src.util import feature_db_accessor
@@ -8,15 +8,23 @@ from model_server.src.util import feature_db_accessor
 # Columns that need to be divided by 100 after fetch from DB
 SQL_PCT_COLS = {
     'batter_prev_fb_rate', 'batter_prev_gb_rate', 'batter_prev_whiff_rate',
-        'batter_prev_chase_rate', 'batter_prev_weak_rate', 'batter_prev_under_rate',
-        'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate', 
-        'batter_prev_barrels_per_pa', 'batter_prev_looking_strike_rate',
-        'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
-        'batter_pitch_whiff_rate', 'pitcher_prev_fb_rate', 'pitcher_prev_gb_rate',
-        'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate', 'pitcher_prev_weak_rate',
-        'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate', 
-        'pitcher_prev_barrels_per_pa', 'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
+    'batter_prev_chase_rate', 'batter_prev_weak_rate', 'batter_prev_under_rate',
+    'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate', 
+    'batter_prev_barrels_per_pa', 'batter_prev_looking_strike_rate',
+    'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
+    'batter_pitch_whiff_rate', 'pitcher_prev_fb_rate', 'pitcher_prev_gb_rate',
+    'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate', 'pitcher_prev_weak_rate',
+    'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate', 
+    'pitcher_prev_barrels_per_pa', 'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
 }
+
+ZONE_METRICS = [
+    'batting_average', 'average_exit_velocity', 
+    'average_launch_angle', 'contact_batting_average',
+    'hard_hit_bip_percentage', 'expected_batting_average',
+    'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
+    'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage'
+]
 
 _MODELS_DIR = Path(__file__).parent / 'models'
 
@@ -87,12 +95,6 @@ def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
         'p_hhfb': p_hhfb
     }
 
-def build_out_type_dict(pitch_features: dict) -> Dict[str, float]:
-    df = pd.DataFrame([pitch_features])
-    row = build_out_type_probabilities(df).iloc[0]
-    return row.to_dict()
-
-
 def build_out_type_features_from_db(
     batter_id: str,
     pitcher_id: str,
@@ -119,19 +121,21 @@ def build_out_type_features_from_db(
     )
 
     # Batter previous season per-zone stats
-    batter_zone_raw = feature_db_accessor.fetch_player_out_type_zone_features(
+    batter_zone_raw = feature_db_accessor.fetch_player_zone_features(
         batter_id,
         year,
         entity='batter_out_type_zone',
         is_batter=True,
+        metrics=ZONE_METRICS,
     )
 
     # Pitcher previous season per-zone stats
-    pitcher_zone_raw = feature_db_accessor.fetch_player_out_type_zone_features(
+    pitcher_zone_raw = feature_db_accessor.fetch_player_zone_features(
         pitcher_id,
         year,
         entity='pitcher_out_type_zone',
         is_batter=False,
+        metrics=ZONE_METRICS,
     )
 
     raw: Dict[str, Any] = {}
@@ -180,15 +184,7 @@ def build_out_type_features_from_db(
         if target_zone is None or zone_dict is None:
             return
     
-        zone_metrics = [
-            'batting_average', 'average_exit_velocity', 
-            'average_launch_angle', 'contact_batting_average',
-            'hard_hit_bip_percentage', 'expected_batting_average',
-            'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
-            'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage'
-        ]
-
-        for metric in zone_metrics:
+        for metric in ZONE_METRICS:
             remapped = f'{prefix}_zone_{metric}'
             raw[remapped] = zone_dict.get(f'{metric}_zone{target_zone}')
 
@@ -246,12 +242,12 @@ def predict_pitch_out_type_outcome(
 
 # test
 # context = {
-#     'balls': 3,          # Maximum balls
-#     'strikes': 2,        # Maximum strikes
+#     'balls': 3,
+#     'strikes': 2,
 #     'stand': 'L',
 #     'p_throws': 'R',
 #     'inning': 4,
-#     'inning_topbot': 'Top',  # 1 for Top, 0 for Bot usually
+#     'inning_topbot': 'Top',
 #     'bat_score': 2,
 #     'fld_score': 1,
 #     'runner_on_1b': 1,
