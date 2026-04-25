@@ -7,6 +7,7 @@ import psycopg2.pool
 from psycopg2.extensions import cursor as Cursor
 from psycopg2 import sql
 from .logger import logger
+import pandas as pd
 
 
 load_dotenv()
@@ -61,6 +62,30 @@ def query_table_for_features(table_name: str, features: list[str]) -> Cursor:
         cursor.execute(query)
         print(f"Query completed")
         return cursor.fetchall()
+    
+def query_historical_pitches_by_year(table_name: str, features: list[str], start_year: int = 2015, end_year: int = 2025) -> pd.DataFrame:
+    dfs = []
+    
+    for year in range(start_year, end_year + 1):
+        query = sql.SQL(
+            "SELECT {fields} FROM {table} "
+            "WHERE {date_col} >= %s AND {date_col} < %s;"
+        ).format(
+            fields=sql.SQL(', ').join([sql.Identifier(f) for f in features]),
+            table=sql.Identifier(table_name),
+            date_col=sql.Identifier("game_date"),
+        )
+        
+        with get_read_cursor() as cursor:
+            cursor.execute(query, (f"{year}-01-01", f"{year + 1}-01-01"))
+            rows = cursor.fetchall()
+            year_df = pd.DataFrame(rows, columns=features)
+            dfs.append(year_df)
+            print(f"Fetched {len(year_df):,} rows for {year}")
+    
+    full_df = pd.concat(dfs, ignore_index=True)
+    print(f"Total rows fetched: {len(full_df):,}")
+    return full_df
 
 
 def find_table_for_column(schema: str, column: str) -> Optional[str]:

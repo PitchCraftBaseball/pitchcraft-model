@@ -16,8 +16,8 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-model_training_notebooks/
-model_development/
+pitch_rnn/
+rnn_support_models/
 src/
 start_server
 README.md
