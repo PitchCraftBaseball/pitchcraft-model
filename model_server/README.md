@@ -101,6 +101,7 @@ curl -s -X POST http://localhost:8001/predict \
       }
     }'
 ```
+**Note** we currently have `"year": 2025` specifically for pulling back historical data. 
 
 ### Response shape
 
