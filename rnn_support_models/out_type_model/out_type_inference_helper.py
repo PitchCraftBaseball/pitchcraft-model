@@ -1,21 +1,34 @@
 from __future__ import annotations
-from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict
 import joblib
-import numpy as np
 import pandas as pd
 
-_MODELS_DIR = Path(__file__).parent / 'models'
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_HISTORICAL_PITCHES_PATH = _REPO_ROOT / 'data' / 'historical_pitches.parquet'
+from model_shared import feature_tables
 
-SWING_DESCRIPTIONS = {
-    'foul_bunt', 'foul', 'hit_into_play', 'swinging_strike', 'foul_tip',
-    'swinging_strike_blocked', 'missed_bunt', 'bunt_foul_tip'
+# Columns that need to be divided by 100 after fetch (DB stores them on a
+# 0-100 scale; the models were trained on 0-1).
+SQL_PCT_COLS = {
+    'batter_prev_fb_rate', 'batter_prev_gb_rate', 'batter_prev_whiff_rate',
+    'batter_prev_chase_rate', 'batter_prev_weak_rate', 'batter_prev_under_rate',
+    'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate',
+    'batter_prev_barrels_per_pa', 'batter_prev_looking_strike_rate',
+    'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
+    'batter_pitch_whiff_rate', 'pitcher_prev_fb_rate', 'pitcher_prev_gb_rate',
+    'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate', 'pitcher_prev_weak_rate',
+    'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate',
+    'pitcher_prev_barrels_per_pa', 'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
 }
-WHIFF_DESCRIPTIONS = {'swinging_strike', 'foul_tip', 'swinging_strike_blocked'}
-IN_ZONE_VALUES = set(range(1, 10))
+
+ZONE_METRICS = [
+    'batting_average', 'average_exit_velocity',
+    'average_launch_angle', 'contact_batting_average',
+    'hard_hit_bip_percentage', 'expected_batting_average',
+    'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
+    'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage'
+]
+
+_MODELS_DIR = Path(__file__).parent / 'models'
 
 stage1_data = joblib.load(_MODELS_DIR / 'pa_end_model_v1.pkl')
 stage2_data = joblib.load(_MODELS_DIR / 'so_model_v1.pkl')
@@ -34,159 +47,6 @@ bip_features = stage3_data['features']
 fb_model = stage4_data['model']
 fb_features = stage4_data['features']
 
-@lru_cache(maxsize=1)
-def _load_historical_pitches() -> pd.DataFrame:
-    if not _HISTORICAL_PITCHES_PATH.exists():
-        raise FileNotFoundError(
-            f"No cached historical pitches parquet found at {_HISTORICAL_PITCHES_PATH}"
-        )
-
-    df = pd.read_parquet(_HISTORICAL_PITCHES_PATH)
-    df = df.copy()
-    df['_batter_id'] = df['batter'].astype('Int64').astype(str)
-    df['_pitcher_id'] = df['pitcher'].astype('Int64').astype(str)
-    df['_zone_int'] = pd.to_numeric(df.get('zone'), errors='coerce').astype('Int64')
-    df['_description'] = df['description'].fillna('')
-    return df
-
-def _rate(numerator: Union[int, float], denominator: Union[int, float]) -> float:
-    if denominator is None or denominator == 0:
-        return 0.0
-    return float(numerator) / float(denominator)
-
-def _player_history(player_id: str, year: int, is_batter: bool) -> pd.DataFrame:
-    df = _load_historical_pitches()
-    id_col = '_batter_id' if is_batter else '_pitcher_id'
-    return df[(df[id_col] == str(player_id)) & (df['game_year'] == year)]
-
-def _precomputed_out_type_features(
-    batter_id: str,
-    pitcher_id: str,
-    pitch_type: str,
-    year: int,
-    zone: Optional[int],
-) -> Dict[str, float]:
-    df = _load_historical_pitches()
-    feature_cols = sorted(
-        {
-            col
-            for model_features in (pa_end_features, so_features, bip_features, fb_features)
-            for col in model_features
-            if col in df.columns
-            and (
-                col.startswith('batter_prev_')
-                or col.startswith('batter_pitch_')
-                or col.startswith('batter_zone_')
-                or col.startswith('pitcher_prev_')
-                or col.startswith('pitcher_pitch_')
-                or col.startswith('pitcher_zone_')
-                or col in {'sz_top', 'sz_bot'}
-            )
-        }
-    )
-    if not feature_cols:
-        return {}
-
-    mask = (
-        (df['_batter_id'] == str(batter_id))
-        & (df['_pitcher_id'] == str(pitcher_id))
-        & (df['game_year'] == year)
-        & (df['pitch_type'] == pitch_type)
-    )
-    if zone is not None:
-        zoned = df[mask & (df['_zone_int'] == int(zone))]
-        matched = zoned if not zoned.empty else df[mask]
-    else:
-        matched = df[mask]
-
-    if matched.empty:
-        return {}
-
-    features: Dict[str, float] = {}
-    for col in feature_cols:
-        value = pd.to_numeric(matched[col], errors='coerce').median()
-        if value is not None and not np.isnan(value):
-            features[col] = float(value)
-    return features
-
-def _parquet_player_features(
-    player_id: str,
-    year: int,
-    pitch_type: str,
-    *,
-    is_batter: bool,
-    prefix: str,
-    zone: Optional[int],
-) -> Dict[str, float]:
-    history = _player_history(player_id, year, is_batter)
-    pitch_history = history[history['pitch_type'] == pitch_type]
-
-    features: Dict[str, float] = {}
-    if history.empty:
-        return features
-
-    descriptions = history['_description']
-    swings = descriptions.isin(SWING_DESCRIPTIONS)
-    whiffs = descriptions.isin(WHIFF_DESCRIPTIONS)
-    in_zone = history['_zone_int'].isin(IN_ZONE_VALUES)
-    out_zone = ~in_zone
-    contacts = swings & ~whiffs
-
-    features[f'{prefix}_prev_whiff_rate'] = _rate(whiffs.sum(), swings.sum())
-    features[f'{prefix}_prev_chase_rate'] = _rate((swings & out_zone).sum(), out_zone.sum())
-    features[f'{prefix}_prev_zone_contact_rate'] = _rate((contacts & in_zone).sum(), (swings & in_zone).sum())
-    features[f'{prefix}_prev_looking_strike_rate'] = _rate((~swings & in_zone).sum(), len(history))
-
-    # The raw historical_pitches cache does not contain batted-ball quality
-    # metrics, so these DB-only model inputs intentionally remain at zero.
-    for name in (
-        'fb_rate', 'gb_rate', 'weak_rate', 'under_rate', 'topped_rate',
-        'flareburner_rate', 'solid_rate', 'barrel_rate', 'barrels_per_pa',
-    ):
-        features[f'{prefix}_prev_{name}'] = 0.0
-
-    if not pitch_history.empty:
-        pitch_desc = pitch_history['_description']
-        pitch_swings = pitch_desc.isin(SWING_DESCRIPTIONS)
-        pitch_whiffs = pitch_desc.isin(WHIFF_DESCRIPTIONS)
-        two_strike_pitches = pitch_history['strikes'] == 2
-        features[f'{prefix}_pitch_whiff_rate'] = _rate(pitch_whiffs.sum(), pitch_swings.sum())
-        features[f'{prefix}_pitch_putaway_rate'] = _rate((pitch_whiffs & two_strike_pitches).sum(), two_strike_pitches.sum())
-    else:
-        features[f'{prefix}_pitch_whiff_rate'] = 0.0
-        features[f'{prefix}_pitch_putaway_rate'] = 0.0
-
-    for name in (
-        'average_launch_angle', 'average_exit_velocity',
-        'expected_batting_average', 'batting_average', 'average_mph',
-    ):
-        features[f'{prefix}_pitch_{name}'] = 0.0
-
-    if zone is not None:
-        zone_history = history[history['_zone_int'] == int(zone)]
-        zone_desc = zone_history['_description'] if not zone_history.empty else pd.Series(dtype=object)
-        zone_swings = zone_desc.isin(SWING_DESCRIPTIONS)
-        zone_whiffs = zone_desc.isin(WHIFF_DESCRIPTIONS)
-
-        features[f'{prefix}_zone_whiff_percentage'] = 100.0 * _rate(zone_whiffs.sum(), zone_swings.sum())
-        features[f'{prefix}_zone_swing_percentage'] = 100.0 * _rate(zone_swings.sum(), len(zone_history))
-
-        for name in (
-            'batting_average', 'average_exit_velocity', 'average_launch_angle',
-            'contact_batting_average', 'hard_hit_bip_percentage',
-            'expected_batting_average', 'strikeout_percentage',
-            'walk_percentage', 'ground_ball_percentage',
-        ):
-            features[f'{prefix}_zone_{name}'] = 0.0
-        features[f'{prefix}_zone_fly_ball_rate'] = 0.0
-
-    return features
-
-def _median_float(series: pd.Series, default: float = 0.0) -> float:
-    value = pd.to_numeric(series, errors='coerce').median()
-    if value is None or np.isnan(value):
-        return default
-    return float(value)
 
 def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
@@ -203,6 +63,7 @@ def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFram
             df[col] = 0
 
     return df[features]
+
 
 def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
     df_stage1 = prepare_inference_data(df, pa_end_features)
@@ -238,53 +99,103 @@ def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
         'p_hhfb': p_hhfb
     }
 
+
 def build_out_type_features_from_parquet(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    zone: int = None
+    zone: int = None,
 ) -> Dict[str, Any]:
-    precomputed = _precomputed_out_type_features(
-        batter_id,
-        pitcher_id,
-        pitch_type,
-        year,
-        zone,
+    batter_prev_raw = feature_tables.fetch_player_out_type_historical_features(
+        batter_id, year, pitch_type, is_batter=True,
     )
-    if precomputed:
-        return precomputed
-
-    batter_history = _player_history(batter_id, year, True)
-    pitcher_history = _player_history(pitcher_id, year, False)
+    pitcher_prev_raw = feature_tables.fetch_player_out_type_historical_features(
+        pitcher_id, year, pitch_type, is_batter=False,
+    )
+    batter_zone_raw = feature_tables.fetch_player_zone_features(
+        batter_id, year, is_batter=True, metrics=ZONE_METRICS,
+    )
+    pitcher_zone_raw = feature_tables.fetch_player_zone_features(
+        pitcher_id, year, is_batter=False, metrics=ZONE_METRICS,
+    )
 
     raw: Dict[str, Any] = {}
-    raw.update(
-        _parquet_player_features(
-            batter_id,
-            year,
-            pitch_type,
-            is_batter=True,
-            prefix='batter',
-            zone=zone,
-        )
+
+    rename_cols = {
+        'ground_ball_percentage': 'gb_rate',
+        'air_ball_percentage': 'fb_rate',
+        'whiff_percentage': 'whiff_rate',
+        'chase_percentage': 'chase_rate',
+        'weak_percentage': 'weak_rate',
+        'under_percentage': 'under_rate',
+        'topped_percentage': 'topped_rate',
+        'flareburner_percentage': 'flareburner_rate',
+        'solid_percentage': 'solid_rate',
+        'barrel_percentage': 'barrel_rate',
+        'barrels_per_pa': 'barrels_per_pa',
+        'zone_contact_percentage': 'zone_contact_rate',
+    }
+
+    pitch_rename_cols = {
+        'batting_average': 'batting_average',
+        'putaway_percentage': 'putaway_rate',
+        'pitch_whiff_percentage': 'whiff_rate',
+        'average_launch_angle': 'average_launch_angle',
+        'average_exit_velocity': 'average_exit_velocity',
+        'expected_batting_average': 'expected_batting_average',
+        'average_mph': 'average_mph',
+    }
+
+    def _remap_stats(raw_dict, prefix):
+        for col_name, rename in rename_cols.items():
+            remapped = f'{prefix}_prev_{rename}'
+            raw[remapped] = raw_dict.get(col_name)
+
+        for col_name, rename in pitch_rename_cols.items():
+            remapped = f'{prefix}_pitch_{rename}'
+            raw[remapped] = raw_dict.get(col_name)
+
+        raw['sz_top'] = raw_dict.get('sz_top')
+        raw['sz_bot'] = raw_dict.get('sz_bot')
+
+    _remap_stats(batter_prev_raw, 'batter')
+    _remap_stats(pitcher_prev_raw, 'pitcher')
+
+    def _map_zone(zone_dict, prefix, target_zone):
+        if target_zone is None or zone_dict is None:
+            return
+
+        for metric in ZONE_METRICS:
+            remapped = f'{prefix}_zone_{metric}'
+            raw[remapped] = zone_dict.get(f'{metric}_zone{target_zone}')
+
+    _map_zone(batter_zone_raw, 'batter', zone)
+    _map_zone(pitcher_zone_raw, 'pitcher', zone)
+
+    batter_zone_pct = float(batter_prev_raw.get('zone_percentage') or 0)
+    batter_swing_pct = float(batter_prev_raw.get('zone_swing_percentage') or 0)
+    raw['batter_prev_looking_strike_rate'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
+
+    raw['batter_zone_fly_ball_rate'] = (
+        float(raw.get('batter_zone_line_drive_percentage') or 0) +
+        float(raw.get('batter_zone_fly_ball_percentage') or 0) +
+        float(raw.get('batter_zone_popup_percentage') or 0)
     )
-    raw.update(
-        _parquet_player_features(
-            pitcher_id,
-            year,
-            pitch_type,
-            is_batter=False,
-            prefix='pitcher',
-            zone=zone,
-        )
+    raw['pitcher_zone_fly_ball_rate'] = (
+        float(raw.get('pitcher_zone_line_drive_percentage') or 0) +
+        float(raw.get('pitcher_zone_fly_ball_percentage') or 0) +
+        float(raw.get('pitcher_zone_popup_percentage') or 0)
     )
 
-    strike_zone_source = batter_history if not batter_history.empty else pitcher_history
-    raw['sz_top'] = _median_float(strike_zone_source['sz_top']) if not strike_zone_source.empty else 0.0
-    raw['sz_bot'] = _median_float(strike_zone_source['sz_bot']) if not strike_zone_source.empty else 0.0
+    for col in SQL_PCT_COLS:
+        if col in raw and raw[col] is not None:
+            raw[col] = float(raw[col]) / 100.0
+        else:
+            raw[col] = 0.0
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
+
 
 def predict_pitch_out_type_outcome(
     batter_id: str,
@@ -310,31 +221,3 @@ def predict_pitch_out_type_outcome(
     df = pd.DataFrame([full_features])
     probs = build_out_type_probabilities(df)
     return probs
-
-# test
-# context = {
-#     'balls': 3,
-#     'strikes': 2,
-#     'stand': 'L',
-#     'p_throws': 'R',
-#     'inning': 4,
-#     'inning_topbot': 'Top',
-#     'bat_score': 2,
-#     'fld_score': 1,
-#     'runner_on_1b': 1,
-#     'runner_on_2b': 0,
-#     'runner_on_3b': 0,
-#     'outs_when_up': 1,
-#     'prev_pitch_type': 'FF'
-# }
-
-# prediction = predict_pitch_out_type_outcome(
-#     batter_id='660271', # Shohei
-#     pitcher_id='554430', # Zack Wheeler
-#     pitch_type='FF',
-#     zone=12,
-#     year=2025,
-#     game_context=context
-# )
-
-# print(prediction)
