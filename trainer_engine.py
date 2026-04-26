@@ -4,6 +4,7 @@ from model_shared.feature_engineering.pitch_constants import *
 from model_shared.feature_engineering.data_preprocessor import clean_data
 from model_shared.feature_engineering.feature_repository import get_rnn_features
 from model_shared.feature_engineering.location import *
+from model_shared.parquet import get_training_data
 from pitch_rnn.pitch_rnn_trainer import rnn_training_handler
 from evaluations.pitch_rnn.evaluate_rnn import evaluate_rnn
 from model_shared.db import query_historical_pitches_by_year 
@@ -47,17 +48,6 @@ MODEL_HYPERPARAMETERS = {
     'stopping_delta': 0.01,
     'batch_size': 64,
 }
-
-def get_training_data(features: list[str], force_refresh: bool = False) -> pd.DataFrame:
-    cache_path = DATA_DIR / "historical_pitches.parquet"
-    
-    if cache_path.exists() and not force_refresh:
-        return load_training_data()
-    
-    print("No cache found, querying database...")
-    df = query_historical_pitches_by_year("historical_pitches", features, start_year=2021, end_year=2025)
-    save_training_data(df)
-    return df
 
 def main():
     # Step 1: Load teh Data 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
 from typing import Dict, Protocol
 
 import pandas as pd
@@ -24,6 +26,10 @@ _BATTER_SIT_COLS = [
 
 _HISTORY_COLS = ["balls", "strikes", "pitch_type", "description"]
 
+_HISTORICAL_PITCHES_PATH = (
+    Path(__file__).resolve().parents[3] / "data" / "historical_pitches.parquet"
+)
+
 
 class FeatureStore(Protocol):
     def get_pitcher_situation_splits(
@@ -35,13 +41,11 @@ class FeatureStore(Protocol):
     ) -> Dict[str, float]: ...
 
 
-class SqlHistoricalPitchesFeatureStore:
-    """Compute situational splits live from ``historical_pitches``.
-
-    Loads one player's pitch history into a DataFrame and delegates to
-    ``pitcher_situation_lookup`` / ``batter_situation_lookup`` in
-    ``feature_calculator.py`` — the same functions training uses — so
-    inference-time rates are guaranteed to match training-time rates.
+class _BaseHistoricalPitchesFeatureStore:
+    """Shared situation-split logic. Subclasses only need to provide
+    ``_load_player_history`` — everything else (the lookup wiring and the
+    empty-frame zero default) lives here so SQL and parquet variants stay
+    in lockstep.
     """
 
     def get_pitcher_situation_splits(
@@ -70,8 +74,17 @@ class SqlHistoricalPitchesFeatureStore:
         row = match.iloc[0]
         return {col: float(row[col]) for col in _BATTER_SIT_COLS}
 
-    @staticmethod
-    def _load_player_history(role: str, player_id: str) -> pd.DataFrame:
+    def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
+        raise NotImplementedError
+
+
+class SqlHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
+    """Compute situational splits live from the ``historical_pitches`` SQL
+    table. Kept available for explicit opt-in; the parquet-backed store is
+    the default.
+    """
+
+    def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
         columns = [role, *_HISTORY_COLS]
         select_list = ", ".join(columns)
         query = (
@@ -81,3 +94,35 @@ class SqlHistoricalPitchesFeatureStore:
             cursor.execute(query, (player_id,))
             rows = cursor.fetchall()
         return pd.DataFrame(rows, columns=columns)
+
+
+@lru_cache(maxsize=1)
+def _load_historical_pitches() -> pd.DataFrame:
+    if not _HISTORICAL_PITCHES_PATH.exists():
+        raise FileNotFoundError(
+            f"No cached historical pitches parquet found at {_HISTORICAL_PITCHES_PATH}"
+        )
+
+    df = pd.read_parquet(
+        _HISTORICAL_PITCHES_PATH,
+        columns=["batter", "pitcher", *_HISTORY_COLS],
+    )
+    df = df.copy()
+    df["_batter_id"] = df["batter"].astype("Int64").astype(str)
+    df["_pitcher_id"] = df["pitcher"].astype("Int64").astype(str)
+    return df
+
+
+class ParquetHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
+    """Compute situational splits from ``data/historical_pitches.parquet``.
+
+    The parquet is read once (lru_cache) and reused across requests, so
+    per-request work is just a hash-equality filter on the cached frame —
+    no DB round-trip.
+    """
+
+    def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
+        df = _load_historical_pitches()
+        id_col = "_batter_id" if role == "batter" else "_pitcher_id"
+        matched = df[df[id_col] == str(player_id)]
+        return matched[[role, *_HISTORY_COLS]].reset_index(drop=True)

@@ -1,3 +1,14 @@
+"""Inference helper for the transition model (relocated from
+``rnn_support_models.transition_model.transition_inference_helper``).
+
+The trained pickles live with the training code at
+``rnn_support_models/transition_model/models/`` and are loaded from there
+at module import time. Features are pulled from
+``data/historical_pitches.parquet`` rather than the feature DB, mirroring
+the approach used by
+``rnn_support_models.out_type_model.out_type_inference_helper``.
+"""
+
 from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
@@ -6,9 +17,9 @@ import joblib
 import numpy as np
 import pandas as pd
 
-_MODELS_DIR = Path(__file__).parent / 'models'
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_HISTORICAL_PITCHES_PATH = _REPO_ROOT / 'data' / 'historical_pitches.parquet'
+ZONE_METRICS = [
+    'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage'
+]
 
 SWING_DESCRIPTIONS = {
     'foul_bunt', 'foul', 'hit_into_play', 'swinging_strike', 'foul_tip',
@@ -17,22 +28,18 @@ SWING_DESCRIPTIONS = {
 WHIFF_DESCRIPTIONS = {'swinging_strike', 'foul_tip', 'swinging_strike_blocked'}
 IN_ZONE_VALUES = set(range(1, 10))
 
-stage1_data = joblib.load(_MODELS_DIR / 'pa_end_model_v1.pkl')
-stage2_data = joblib.load(_MODELS_DIR / 'so_model_v1.pkl')
-stage3_data = joblib.load(_MODELS_DIR / 'bip_model_v1.pkl')
-stage4_data = joblib.load(_MODELS_DIR / 'fb_model_v1.pkl')
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_MODELS_DIR = _REPO_ROOT / "rnn_support_models" / "transition_model" / "models"
+_HISTORICAL_PITCHES_PATH = _REPO_ROOT / 'data' / 'historical_pitches.parquet'
 
-pa_end_model = stage1_data['model']
-pa_end_features = stage1_data['features']
+stage1_data = joblib.load(_MODELS_DIR / 'swing_model_v1.pkl')
+stage2_data = joblib.load(_MODELS_DIR / 'called_strike_model_v1.pkl')
 
-so_model = stage2_data['model']
-so_features = stage2_data['features']
+swing_model = stage1_data['model']
+swing_features = stage1_data['features']
 
-bip_model = stage3_data['model']
-bip_features = stage3_data['features']
-
-fb_model = stage4_data['model']
-fb_features = stage4_data['features']
+called_strike_model = stage2_data['model']
+called_strike_features = stage2_data['features']
 
 @lru_cache(maxsize=1)
 def _load_historical_pitches() -> pd.DataFrame:
@@ -59,7 +66,13 @@ def _player_history(player_id: str, year: int, is_batter: bool) -> pd.DataFrame:
     id_col = '_batter_id' if is_batter else '_pitcher_id'
     return df[(df[id_col] == str(player_id)) & (df['game_year'] == year)]
 
-def _precomputed_out_type_features(
+def _median_float(series: pd.Series, default: float = 0.0) -> float:
+    value = pd.to_numeric(series, errors='coerce').median()
+    if value is None or np.isnan(value):
+        return default
+    return float(value)
+
+def _precomputed_transition_features(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
@@ -70,7 +83,7 @@ def _precomputed_out_type_features(
     feature_cols = sorted(
         {
             col
-            for model_features in (pa_end_features, so_features, bip_features, fb_features)
+            for model_features in (swing_features, called_strike_features)
             for col in model_features
             if col in df.columns
             and (
@@ -137,13 +150,17 @@ def _parquet_player_features(
     features[f'{prefix}_prev_zone_contact_rate'] = _rate((contacts & in_zone).sum(), (swings & in_zone).sum())
     features[f'{prefix}_prev_looking_strike_rate'] = _rate((~swings & in_zone).sum(), len(history))
 
-    # The raw historical_pitches cache does not contain batted-ball quality
-    # metrics, so these DB-only model inputs intentionally remain at zero.
-    for name in (
-        'fb_rate', 'gb_rate', 'weak_rate', 'under_rate', 'topped_rate',
-        'flareburner_rate', 'solid_rate', 'barrel_rate', 'barrels_per_pa',
-    ):
-        features[f'{prefix}_prev_{name}'] = 0.0
+    first_pitch = history[(history['balls'] == 0) & (history['strikes'] == 0)]
+    if not first_pitch.empty:
+        first_pitch_swings = first_pitch['_description'].isin(SWING_DESCRIPTIONS)
+        features[f'{prefix}_prev_first_pitch_swing_rate'] = _rate(first_pitch_swings.sum(), len(first_pitch))
+    else:
+        features[f'{prefix}_prev_first_pitch_swing_rate'] = 0.0
+
+    # "Meatball" requires zone+velocity bounds that aren't recoverable from
+    # raw pitch rows. The precomputed-rollup path supplies it; this fallback
+    # (no matchup history) leaves it at 0.
+    features[f'{prefix}_prev_meatball_swing_rate'] = 0.0
 
     if not pitch_history.empty:
         pitch_desc = pitch_history['_description']
@@ -156,12 +173,6 @@ def _parquet_player_features(
         features[f'{prefix}_pitch_whiff_rate'] = 0.0
         features[f'{prefix}_pitch_putaway_rate'] = 0.0
 
-    for name in (
-        'average_launch_angle', 'average_exit_velocity',
-        'expected_batting_average', 'batting_average', 'average_mph',
-    ):
-        features[f'{prefix}_pitch_{name}'] = 0.0
-
     if zone is not None:
         zone_history = history[history['_zone_int'] == int(zone)]
         zone_desc = zone_history['_description'] if not zone_history.empty else pd.Series(dtype=object)
@@ -171,22 +182,13 @@ def _parquet_player_features(
         features[f'{prefix}_zone_whiff_percentage'] = 100.0 * _rate(zone_whiffs.sum(), zone_swings.sum())
         features[f'{prefix}_zone_swing_percentage'] = 100.0 * _rate(zone_swings.sum(), len(zone_history))
 
-        for name in (
-            'batting_average', 'average_exit_velocity', 'average_launch_angle',
-            'contact_batting_average', 'hard_hit_bip_percentage',
-            'expected_batting_average', 'strikeout_percentage',
-            'walk_percentage', 'ground_ball_percentage',
-        ):
-            features[f'{prefix}_zone_{name}'] = 0.0
-        features[f'{prefix}_zone_fly_ball_rate'] = 0.0
+        # PA-level outcome rates aren't reconstructable from raw pitch
+        # descriptions alone. The precomputed-rollup path supplies them
+        # from zone_metrics; this fallback leaves them at 0.
+        features[f'{prefix}_zone_strikeout_percentage'] = 0.0
+        features[f'{prefix}_zone_walk_percentage'] = 0.0
 
     return features
-
-def _median_float(series: pd.Series, default: float = 0.0) -> float:
-    value = pd.to_numeric(series, errors='coerce').median()
-    if value is None or np.isnan(value):
-        return default
-    return float(value)
 
 def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
@@ -204,48 +206,38 @@ def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFram
 
     return df[features]
 
-def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
-    df_stage1 = prepare_inference_data(df, pa_end_features)
+def build_pitch_result_probabilities(df: pd.DataFrame) -> Dict[str, float]:
+    df_stage1 = prepare_inference_data(df, swing_features)
 
-    p_pa_end = pa_end_model.predict_proba(df_stage1)[:, 1]
-    p_no_end = 1 - p_pa_end
+    p_swing = swing_model.predict_proba(df_stage1)[:, 1]
+    p_take = 1 - p_swing
 
-    df_stage2 = prepare_inference_data(df, so_features)
-    p_so_given_end = so_model.predict_proba(df_stage2)[:, 1] # P(SO | PA End)
-    p_bip_given_end = 1 - p_so_given_end # P(BIP | PA End)
+    df_stage2 = prepare_inference_data(df, called_strike_features)
+    p_strike_given_take = called_strike_model.predict_proba(df_stage2)[:, 1] # P(Called Strike | Take)
+    p_ball_given_take = 1 - p_strike_given_take # P(Ball | Take)
 
-    df_stage3 = prepare_inference_data(df, bip_features)
-    p_gb_given_bip = bip_model.predict_proba(df_stage3)[:, 1] # P(GB | BIP, PA End)
-    p_fb_given_bip = 1 - p_gb_given_bip # P(FB | BIP, PA End)
+    p_called_strike = p_take * p_strike_given_take # P(Called Strike) = P(Take) * P(Called Strike | Take)
+    p_ball = p_take * p_ball_given_take # P(Ball) = P(Take) * P(Ball | Take)
 
-    p_so = p_pa_end * p_so_given_end # P(SO) = P(PA End) * P(SO | PA End)
-    p_bip_end = p_pa_end * p_bip_given_end # P(BIP) = P(PA End) * P(BIP | PA End)
+    p_strike = p_swing + p_called_strike # P(Strike) = P(Swing) + P(Called Strike)
 
-    p_go = p_bip_end * p_gb_given_bip # P(GB) = P(BIP) * P(GB | BIP)
-    p_fb = p_bip_end * p_fb_given_bip # P(FB) = P(BIP) * P(FB | BIP)
-
-    df_stage4 = prepare_inference_data(df, fb_features)
-    p_hhfb_given_fb = fb_model.predict_proba(df_stage4)[:, 1]
-
-    p_hhfb = p_fb * p_hhfb_given_fb # P(HHFB) = P(FB) * P(HHFB | FB)
-    p_fo = p_fb * (1.0 - p_hhfb_given_fb) # P(FO) = 1 - P(HHFB | FB), regular fly balls that aren't hard-hit
+    total = p_strike + p_ball
+    p_strike /= total
+    p_ball /= total
 
     return {
-        'p_none': p_no_end,
-        'p_so': p_so,
-        'p_go': p_go,
-        'p_fo': p_fo,
-        'p_hhfb': p_hhfb
+        'p_strike': p_strike,
+        'p_ball': p_ball,
     }
 
-def build_out_type_features_from_parquet(
+def build_transition_features_from_parquet(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    zone: int = None
+    zone: int = None,
 ) -> Dict[str, Any]:
-    precomputed = _precomputed_out_type_features(
+    precomputed = _precomputed_transition_features(
         batter_id,
         pitcher_id,
         pitch_type,
@@ -286,20 +278,20 @@ def build_out_type_features_from_parquet(
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
 
-def predict_pitch_out_type_outcome(
+def predict_pitch_transition_outcome(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    game_context: Dict[str, any],
+    game_context: Dict[str, Any],
     zone: int = None,
 ) -> Dict[str, float]:
-    parquet_features = build_out_type_features_from_parquet(
+    parquet_features = build_transition_features_from_parquet(
         batter_id,
         pitcher_id,
         pitch_type,
         year,
-        zone,
+        zone=zone,
     )
 
     full_features = {**parquet_features, **game_context}
@@ -308,33 +300,5 @@ def predict_pitch_out_type_outcome(
     full_features['zone'] = zone
 
     df = pd.DataFrame([full_features])
-    probs = build_out_type_probabilities(df)
+    probs = build_pitch_result_probabilities(df)
     return probs
-
-# test
-# context = {
-#     'balls': 3,
-#     'strikes': 2,
-#     'stand': 'L',
-#     'p_throws': 'R',
-#     'inning': 4,
-#     'inning_topbot': 'Top',
-#     'bat_score': 2,
-#     'fld_score': 1,
-#     'runner_on_1b': 1,
-#     'runner_on_2b': 0,
-#     'runner_on_3b': 0,
-#     'outs_when_up': 1,
-#     'prev_pitch_type': 'FF'
-# }
-
-# prediction = predict_pitch_out_type_outcome(
-#     batter_id='660271', # Shohei
-#     pitcher_id='554430', # Zack Wheeler
-#     pitch_type='FF',
-#     zone=12,
-#     year=2025,
-#     game_context=context
-# )
-
-# print(prediction)
