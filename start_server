@@ -14,6 +14,6 @@ pip install -r requirements.txt
 # bootstrap parquet files to docker image 
 python -m model_shared.setup
 
-uvicorn model_server.src.api:app --host 0.0.0.0 --port 8001
+uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000
 
 
