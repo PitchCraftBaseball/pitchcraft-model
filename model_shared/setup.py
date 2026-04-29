@@ -114,7 +114,8 @@ def _bootstrap_support_tables() -> None:
 
 if __name__ == "__main__":
     logger.info("Running setup script")
-    feature_list_dict = validate_feature_list_file("/home/shakotan/git-linux/pitchcraft-repos/pitchcraft-model/feature_list")
+    feature_list_path = Path(__file__).resolve().parent.parent / "feature_list"
+    feature_list_dict = validate_feature_list_file(str(feature_list_path))
     if not feature_list_dict:
         raise ValueError("Feature list validation failed")
 

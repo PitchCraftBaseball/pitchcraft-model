@@ -15,6 +15,8 @@ COPY pitch_rnn ./pitch_rnn
 
 COPY rnn_support_models ./rnn_support_models
 
+COPY feature_list feature_list
+
 COPY certs ./certs
 
 CMD ["sh", "-c", "python -m model_shared.setup && exec uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000"]
