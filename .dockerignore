@@ -17,7 +17,6 @@ venv/
 .pytest_cache/
 .ruff_cache/
 pitch_rnn/
-rnn_support_models/
 src/
 start_server
 README.md
