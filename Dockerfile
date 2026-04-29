@@ -17,6 +17,4 @@ COPY rnn_support_models ./rnn_support_models
 
 COPY certs ./certs
 
-RUN python -m model_shared.setup
-
-CMD ["uvicorn", "model_server.src.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m model_shared.setup && exec uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000"]
