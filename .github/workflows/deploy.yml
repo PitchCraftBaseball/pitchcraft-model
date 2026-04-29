@@ -71,6 +71,7 @@ jobs:
             mkdir -p /opt/pitchcraft-model
             cd /opt/pitchcraft-model 
             truncate -s 0 /opt/pitchcraft-model/.env
+            truncate -s 0 /opt/pitchcraft-model/.env.runtime
             echo "IMAGE_TAG=${{ github.sha }}" >> .env.runtime
             echo "DB_USER=${{ secrets.DB_USER }}" >> /opt/pitchcraft-model/.env
             echo "DB_DATABASE=${{ secrets.DB_DATABASE }}" >> /opt/pitchcraft-model/.env
@@ -81,6 +82,8 @@ jobs:
             docker login ghcr.io -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
             DC="docker compose"
             if command -v docker-compose >/dev/null 2>&1; then DC="docker-compose"; fi
+            docker image prune -f
+            docker builder prune -f
             $DC --env-file .env.runtime pull 
             $DC --env-file .env.runtime up -d --remove-orphans
             docker image prune -f

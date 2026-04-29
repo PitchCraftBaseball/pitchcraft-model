@@ -1,10 +1,15 @@
-FROM python:3.12
+FROM python:3.12-slim
 
 WORKDIR /pitchcraft-model
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./requirements.txt
 
-RUN pip install --no-cache-dir --upgrade -r ./requirements.txt
+RUN pip install --no-cache-dir --upgrade --index-url https://download.pytorch.org/whl/cpu torch==2.10.0 \
+    && pip install --no-cache-dir --upgrade -r ./requirements.txt
 
 COPY model_server ./model_server
 
