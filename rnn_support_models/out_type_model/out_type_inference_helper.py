@@ -3,23 +3,25 @@ from pathlib import Path
 from typing import Any, Dict
 import joblib
 import pandas as pd
-from model_server.src.util import feature_db_accessor
 
-# Columns that need to be divided by 100 after fetch from DB
+from model_shared import feature_tables
+
+# Columns that need to be divided by 100 after fetch (DB stores them on a
+# 0-100 scale; the models were trained on 0-1).
 SQL_PCT_COLS = {
     'batter_prev_fb_rate', 'batter_prev_gb_rate', 'batter_prev_whiff_rate',
     'batter_prev_chase_rate', 'batter_prev_weak_rate', 'batter_prev_under_rate',
-    'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate', 
+    'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate',
     'batter_prev_barrels_per_pa', 'batter_prev_looking_strike_rate',
     'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
     'batter_pitch_whiff_rate', 'pitcher_prev_fb_rate', 'pitcher_prev_gb_rate',
     'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate', 'pitcher_prev_weak_rate',
-    'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate', 
+    'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate',
     'pitcher_prev_barrels_per_pa', 'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
 }
 
 ZONE_METRICS = [
-    'batting_average', 'average_exit_velocity', 
+    'batting_average', 'average_exit_velocity',
     'average_launch_angle', 'contact_batting_average',
     'hard_hit_bip_percentage', 'expected_batting_average',
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
@@ -45,6 +47,7 @@ bip_features = stage3_data['features']
 fb_model = stage4_data['model']
 fb_features = stage4_data['features']
 
+
 def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
     df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
@@ -60,6 +63,7 @@ def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFram
             df[col] = 0
 
     return df[features]
+
 
 def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
     df_stage1 = prepare_inference_data(df, pa_end_features)
@@ -95,47 +99,25 @@ def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
         'p_hhfb': p_hhfb
     }
 
-def build_out_type_features_from_db(
+
+def build_out_type_features_from_parquet(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    zone: int = None
+    zone: int = None,
 ) -> Dict[str, Any]:
-    # Batter previous season general stats
-    batter_prev_raw = feature_db_accessor.fetch_player_out_type_historical_features(
-        batter_id,
-        year,
-        pitch_type,
-        entity='batter_out_type_prev',
-        is_batter=True,
+    batter_prev_raw = feature_tables.fetch_player_out_type_historical_features(
+        batter_id, year, pitch_type, is_batter=True,
     )
-
-    # Pitcher previous season general stats
-    pitcher_prev_raw = feature_db_accessor.fetch_player_out_type_historical_features(
-        pitcher_id,
-        year,
-        pitch_type,
-        entity='pitcher_out_type_prev',
-        is_batter=False,
+    pitcher_prev_raw = feature_tables.fetch_player_out_type_historical_features(
+        pitcher_id, year, pitch_type, is_batter=False,
     )
-
-    # Batter previous season per-zone stats
-    batter_zone_raw = feature_db_accessor.fetch_player_zone_features(
-        batter_id,
-        year,
-        entity='batter_out_type_zone',
-        is_batter=True,
-        metrics=ZONE_METRICS,
+    batter_zone_raw = feature_tables.fetch_player_zone_features(
+        batter_id, year, is_batter=True, metrics=ZONE_METRICS,
     )
-
-    # Pitcher previous season per-zone stats
-    pitcher_zone_raw = feature_db_accessor.fetch_player_zone_features(
-        pitcher_id,
-        year,
-        entity='pitcher_out_type_zone',
-        is_batter=False,
-        metrics=ZONE_METRICS,
+    pitcher_zone_raw = feature_tables.fetch_player_zone_features(
+        pitcher_id, year, is_batter=False, metrics=ZONE_METRICS,
     )
 
     raw: Dict[str, Any] = {}
@@ -156,12 +138,12 @@ def build_out_type_features_from_db(
     }
 
     pitch_rename_cols = {
-        'batting_average': 'batting_average', 
-        'putaway_percentage': 'putaway_rate', 
-        'pitch_whiff_percentage': 'whiff_rate', 
+        'batting_average': 'batting_average',
+        'putaway_percentage': 'putaway_rate',
+        'pitch_whiff_percentage': 'whiff_rate',
         'average_launch_angle': 'average_launch_angle',
-        'average_exit_velocity': 'average_exit_velocity', 
-        'expected_batting_average': 'expected_batting_average', 
+        'average_exit_velocity': 'average_exit_velocity',
+        'expected_batting_average': 'expected_batting_average',
         'average_mph': 'average_mph',
     }
 
@@ -169,7 +151,7 @@ def build_out_type_features_from_db(
         for col_name, rename in rename_cols.items():
             remapped = f'{prefix}_prev_{rename}'
             raw[remapped] = raw_dict.get(col_name)
-        
+
         for col_name, rename in pitch_rename_cols.items():
             remapped = f'{prefix}_pitch_{rename}'
             raw[remapped] = raw_dict.get(col_name)
@@ -183,7 +165,7 @@ def build_out_type_features_from_db(
     def _map_zone(zone_dict, prefix, target_zone):
         if target_zone is None or zone_dict is None:
             return
-    
+
         for metric in ZONE_METRICS:
             remapped = f'{prefix}_zone_{metric}'
             raw[remapped] = zone_dict.get(f'{metric}_zone{target_zone}')
@@ -206,7 +188,6 @@ def build_out_type_features_from_db(
         float(raw.get('pitcher_zone_popup_percentage') or 0)
     )
 
-    # Divide necessary columns by 100 to get a 0 to 1 value
     for col in SQL_PCT_COLS:
         if col in raw and raw[col] is not None:
             raw[col] = float(raw[col]) / 100.0
@@ -214,6 +195,7 @@ def build_out_type_features_from_db(
             raw[col] = 0.0
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
+
 
 def predict_pitch_out_type_outcome(
     batter_id: str,
@@ -223,7 +205,7 @@ def predict_pitch_out_type_outcome(
     game_context: Dict[str, any],
     zone: int = None,
 ) -> Dict[str, float]:
-    db_features = build_out_type_features_from_db(
+    parquet_features = build_out_type_features_from_parquet(
         batter_id,
         pitcher_id,
         pitch_type,
@@ -231,7 +213,7 @@ def predict_pitch_out_type_outcome(
         zone,
     )
 
-    full_features = {**db_features, **game_context}
+    full_features = {**parquet_features, **game_context}
 
     full_features['pitch_type'] = pitch_type
     full_features['zone'] = zone
@@ -239,31 +221,3 @@ def predict_pitch_out_type_outcome(
     df = pd.DataFrame([full_features])
     probs = build_out_type_probabilities(df)
     return probs
-
-# test
-# context = {
-#     'balls': 3,
-#     'strikes': 2,
-#     'stand': 'L',
-#     'p_throws': 'R',
-#     'inning': 4,
-#     'inning_topbot': 'Top',
-#     'bat_score': 2,
-#     'fld_score': 1,
-#     'runner_on_1b': 1,
-#     'runner_on_2b': 0,
-#     'runner_on_3b': 0,
-#     'outs_when_up': 1,
-#     'prev_pitch_type': 'FF'
-# }
-
-# prediction = predict_pitch_out_type_outcome(
-#     batter_id='660271', # Shohei
-#     pitcher_id='554430', # Zack Wheeler
-#     pitch_type='FF',
-#     zone=12,
-#     year=2025,
-#     game_context=context
-# )
-
-# print(prediction)

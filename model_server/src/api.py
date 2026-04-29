@@ -1,22 +1,47 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, Optional
 
 import torch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from .util.pitch_state_builder import build_pitch_state_from_features
-from .util.pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
 from model_shared.parameter_loaders import (
     latest_parameters,
     latest_vocab_json,
     load_vocabs_from_json,
 )
 from model_shared.rnn_definition import PitchRNN
-from .util.feature_db_accessor import fetch_player_features
+
+from .util.feature_store import FeatureStore, ParquetHistoricalPitchesFeatureStore
+from .util.inference_engine import (
+    InferenceEngine,
+    PitchStep,
+    PlayerNotFoundError,
+    SimulationResult,
+    Strategy,
+)
+from .util.pitch_state_builder import MissingFeaturesError
+
+
+logger = logging.getLogger(__name__)
+
+
+REQUIRED_STATE_KEYS = [
+    "balls",
+    "strikes",
+    "outs_when_up",
+    "inning",
+    "inning_topbot",
+    "bat_score_diff",
+    "on_1b",
+    "on_2b",
+    "on_3b",
+]
 
 
 class Artifacts:
@@ -50,15 +75,56 @@ class Artifacts:
 class PredictRequest(BaseModel):
     pitcher: str = Field(..., min_length=1)
     batter: str = Field(..., min_length=1)
+    year: int
     state_features: Dict[str, Any] = Field(default_factory=dict)
-    batter_features: List[str] = Field(default_factory=list)
-    pitcher_features: List[str] = Field(default_factory=list)
+    strategy: Strategy = "argmax"
+    max_pitches: int = Field(default=12, ge=1, le=30)
 
 
-PredictResponse = Dict[str, Dict[str, float]]
+class PredictedPitch(BaseModel):
+    pitch_index: int
+    pitch_type: str
+    rnn_pitch_probs: Dict[str, float]
+    p_strike: float
+    p_ball: float
+    out_type_probs: Dict[str, float]
+    transition_event: str
+    out_type_event: str
+    balls_after: int
+    strikes_after: int
+    terminal: bool
+    outcome: Optional[str] = None
 
 
-def create_app() -> FastAPI:
+class PredictResponse(BaseModel):
+    outcome: Literal["walk", "strikeout", "groundout", "flyout", "hard_hit_flyball", "in_progress"]
+    pitch_count: int
+    sequence: List[PredictedPitch]
+
+
+def _step_to_payload(step: PitchStep) -> PredictedPitch:
+    return PredictedPitch(
+        pitch_index=step.pitch_index,
+        pitch_type=step.pitch_type,
+        rnn_pitch_probs=step.rnn_pitch_probs,
+        p_strike=step.p_strike,
+        p_ball=step.p_ball,
+        out_type_probs=step.out_type_probs,
+        transition_event=step.transition_event,
+        out_type_event=step.out_type_event,
+        balls_after=step.balls_after,
+        strikes_after=step.strikes_after,
+        terminal=step.terminal,
+        outcome=step.outcome,
+    )
+
+
+def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
     app = FastAPI(title="Pitch RNN Inference API")
 
     artifacts_path = Path(__file__).resolve().parent / "model_config.json"
@@ -86,42 +152,62 @@ def create_app() -> FastAPI:
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
     model.eval()
 
+    store: FeatureStore = feature_store or ParquetHistoricalPitchesFeatureStore()
+    engine = InferenceEngine(artifacts=artifacts, rnn=model, feature_store=store)
+
     @app.get("/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/predict", response_model=PredictResponse)
     def predict(req: PredictRequest) -> PredictResponse:
-        batter_features = fetch_player_features(
-            req.batter,
-            req.batter_features,
-            entity="batter",
-            is_batter=True,
-        )
-        pitcher_features = fetch_player_features(
-            req.pitcher,
-            req.pitcher_features,
-            entity="pitcher",
-            is_batter=False,
+        start = time.perf_counter()
+        logger.info(
+            "predict request: pitcher=%s batter=%s year=%s strategy=%s max_pitches=%s",
+            req.pitcher, req.batter, req.year, req.strategy, req.max_pitches,
         )
 
-        states = [
-            build_pitch_state_from_features(
-                req.pitcher,
-                req.batter,
-                req.state_features,
-                batter_features,
-                pitcher_features,
+        missing = [k for k in REQUIRED_STATE_KEYS if k not in req.state_features]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "missing_features": missing,
+                    "message": "state_features is missing required keys.",
+                },
             )
-        ]
 
-        x_cat, x_num, seq_len = build_tensors(states, artifacts)
-        with torch.no_grad():
-            logits_pitch, _logits_horiz, _logits_vert = model(x_cat, x_num)
-            # TODO: expose location predictions (horiz/vert) in a future API version
-            probs = torch.softmax(logits_pitch, dim=-1)[0]
+        try:
+            result: SimulationResult = engine.simulate_plate_appearance(
+                pitcher=req.pitcher,
+                batter=req.batter,
+                year=req.year,
+                state_features=req.state_features,
+                strategy=req.strategy,
+                max_pitches=req.max_pitches,
+            )
+        except PlayerNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except MissingFeaturesError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "missing_features": exc.missing,
+                    "message": "Request is missing features required by the loaded model.",
+                },
+            )
 
-        return build_pitch_probabilities(probs, artifacts, seq_len)
+        response = PredictResponse(
+            outcome=result.outcome,
+            pitch_count=result.pitch_count,
+            sequence=[_step_to_payload(step) for step in result.sequence],
+        )
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "predict response: pitcher=%s batter=%s outcome=%s pitch_count=%d elapsed_ms=%.2f",
+            req.pitcher, req.batter, result.outcome, result.pitch_count, elapsed_ms,
+        )
+        return response
 
     return app
 

@@ -1,11 +1,24 @@
+"""Inference helper for the transition model (relocated from
+``rnn_support_models.transition_model.transition_inference_helper``).
+
+The trained pickles live with the training code at
+``rnn_support_models/transition_model/models/`` and are loaded from there
+at module import time. Features are pulled from the per-table parquet
+files bootstrapped by ``model_shared.setup`` via
+``model_shared.feature_tables``, mirroring the approach used by
+``rnn_support_models.out_type_model.out_type_inference_helper``.
+"""
+
 from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict
 import joblib
 import pandas as pd
-from model_server.src.util import feature_db_accessor
 
-# Columns that need to be divided by 100 after fetch from DB
+from . import feature_tables
+
+# Columns that need to be divided by 100 after fetch (DB stores them on a
+# 0-100 scale; the models were trained on 0-1).
 SQL_PCT_COLS = {
     'batter_prev_whiff_rate', 'batter_prev_chase_rate', 'batter_prev_looking_strike_rate',
     'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
@@ -19,7 +32,8 @@ ZONE_METRICS = [
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage'
 ]
 
-_MODELS_DIR = Path(__file__).parent / 'models'
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_MODELS_DIR = _REPO_ROOT / "rnn_support_models" / "transition_model" / "models"
 
 stage1_data = joblib.load(_MODELS_DIR / 'swing_model_v1.pkl')
 stage2_data = joblib.load(_MODELS_DIR / 'called_strike_model_v1.pkl')
@@ -29,6 +43,7 @@ swing_features = stage1_data['features']
 
 called_strike_model = stage2_data['model']
 called_strike_features = stage2_data['features']
+
 
 def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
     cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
@@ -45,6 +60,7 @@ def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFram
             df[col] = 0
 
     return df[features]
+
 
 def build_pitch_result_probabilities(df: pd.DataFrame) -> Dict[str, float]:
     df_stage1 = prepare_inference_data(df, swing_features)
@@ -70,47 +86,25 @@ def build_pitch_result_probabilities(df: pd.DataFrame) -> Dict[str, float]:
         'p_ball': p_ball,
     }
 
-def build_transition_features_from_db(
+
+def build_transition_features_from_parquet(
     batter_id: str,
     pitcher_id: str,
     pitch_type: str,
     year: int,
     zone: int = None,
 ) -> Dict[str, Any]:
-    # Batter previous season general stats
-    batter_prev_raw = feature_db_accessor.fetch_player_transition_historical_features(
-        batter_id,
-        year,
-        pitch_type,
-        entity='batter_transition_prev',
-        is_batter=True,
+    batter_prev_raw = feature_tables.fetch_player_transition_historical_features(
+        batter_id, year, pitch_type, is_batter=True,
     )
-
-    # Pitcher previous season general stats
-    pitcher_prev_raw = feature_db_accessor.fetch_player_transition_historical_features(
-        pitcher_id,
-        year,
-        pitch_type,
-        entity='pitcher_transition_prev',
-        is_batter=False,
+    pitcher_prev_raw = feature_tables.fetch_player_transition_historical_features(
+        pitcher_id, year, pitch_type, is_batter=False,
     )
-
-    # Batter previous season per-zone stats
-    batter_zone_raw = feature_db_accessor.fetch_player_zone_features(
-        batter_id,
-        year,
-        entity='batter_transition_zone',
-        is_batter=True,
-        metrics=ZONE_METRICS,
+    batter_zone_raw = feature_tables.fetch_player_zone_features(
+        batter_id, year, is_batter=True, metrics=ZONE_METRICS,
     )
-
-    # Pitcher previous season per-zone stats
-    pitcher_zone_raw = feature_db_accessor.fetch_player_zone_features(
-        pitcher_id,
-        year,
-        entity='pitcher_transition_zone',
-        is_batter=False,
-        metrics=ZONE_METRICS,
+    pitcher_zone_raw = feature_tables.fetch_player_zone_features(
+        pitcher_id, year, is_batter=False, metrics=ZONE_METRICS,
     )
 
     raw: Dict[str, Any] = {}
@@ -158,7 +152,6 @@ def build_transition_features_from_db(
     batter_swing_pct = float(batter_prev_raw.get('zone_swing_percentage') or 0)
     raw['batter_prev_looking_strike_rate'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
 
-    # Divide necessary columns by 100 to get a 0 to 1 value
     for col in SQL_PCT_COLS:
         if col in raw and raw[col] is not None:
             raw[col] = float(raw[col]) / 100.0
@@ -166,6 +159,7 @@ def build_transition_features_from_db(
             raw[col] = 0.0
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
+
 
 def predict_pitch_transition_outcome(
     batter_id: str,
@@ -175,7 +169,7 @@ def predict_pitch_transition_outcome(
     game_context: Dict[str, Any],
     zone: int = None,
 ) -> Dict[str, float]:
-    db_features = build_transition_features_from_db(
+    parquet_features = build_transition_features_from_parquet(
         batter_id,
         pitcher_id,
         pitch_type,
@@ -183,7 +177,7 @@ def predict_pitch_transition_outcome(
         zone=zone,
     )
 
-    full_features = {**db_features, **game_context}
+    full_features = {**parquet_features, **game_context}
 
     full_features['pitch_type'] = pitch_type
     full_features['zone'] = zone
@@ -191,32 +185,3 @@ def predict_pitch_transition_outcome(
     df = pd.DataFrame([full_features])
     probs = build_pitch_result_probabilities(df)
     return probs
-
-# test
-# context = {
-#     'balls': 0,
-#     'strikes': 1,
-#     'stand': 'L',
-#     'p_throws': 'R',
-#     'inning': 4,
-#     'inning_topbot': 'Top',
-#     'bat_score': 2,
-#     'fld_score': 1,
-#     'runner_on_1b': 1,
-#     'runner_on_2b': 0,
-#     'runner_on_3b': 0,
-#     'outs_when_up': 1,
-#     'prev_pitch_type': 'NONE',
-#     'prev_zone': 0
-# }
-
-# prediction = predict_pitch_transition_outcome(
-#     batter_id='575929', # Willson Contreras, decently high swing rates outside strikezone (15.3 |   21.9 |   32.7 |   38.4)
-#     pitcher_id='554430', # Zack Wheeler
-#     pitch_type='FF',
-#     zone=14,
-#     year=2025,
-#     game_context=context
-# )
-
-# print(prediction)

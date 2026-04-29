@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, create_model
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from model_shared.feature_engineering.feature_calculator import count_situation
+
+
+class MissingFeaturesError(Exception):
+    def __init__(self, missing: List[str]) -> None:
+        super().__init__(f"Missing required features: {missing}")
+        self.missing = missing
 
 
 def _infer_field_type(value: Any) -> Any:
@@ -27,6 +33,7 @@ def build_pitch_state_from_features(
     state_features: Dict[str, Any],
     batter_features: Dict[str, Optional[str]],
     pitcher_features: Dict[str, Optional[str]],
+    required_cols: Optional[Iterable[str]] = None,
 ) -> BaseModel:
 
     merged: Dict[str, Any] = {}
@@ -37,6 +44,12 @@ def build_pitch_state_from_features(
     # Ensure player IDs are always set from the request.
     merged["pitcher"] = pitcher_id
     merged["batter"] = batter_id
+
+    if required_cols is not None:
+        missing = sorted(set(required_cols) - set(merged.keys()))
+        if missing:
+            raise MissingFeaturesError(missing)
+
     field_definitions = {
         key: (_infer_field_type(value), ...) for key, value in merged.items()
     }

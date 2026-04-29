@@ -63,6 +63,14 @@ def query_table_for_features(table_name: str, features: list[str]) -> Cursor:
         print(f"Query completed")
         return cursor.fetchall()
     
+def query_table_dataframe(query: str, params: tuple = ()) -> pd.DataFrame:
+    with get_read_cursor() as cursor:
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+    return pd.DataFrame(rows, columns=columns)
+
+
 def query_historical_pitches_by_year(table_name: str, features: list[str], start_year: int = 2015, end_year: int = 2025) -> pd.DataFrame:
     dfs = []
     

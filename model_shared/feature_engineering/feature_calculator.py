@@ -54,8 +54,50 @@ def calculate_game_state_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
+def pitcher_situation_lookup(df: pd.DataFrame) -> pd.DataFrame:
+    hist = df[["pitcher", "balls", "strikes", "pitch_type", "description"]].copy()
+    hist["count_situation"] = hist.apply(
+        lambda r: count_situation(int(r["balls"]), int(r["strikes"])), axis=1
+    )
+    hist["is_fastball"] = hist["pitch_type"].isin(FASTBALL)
+    hist["is_breaking"] = hist["pitch_type"].isin(BREAKING)
+    hist["is_offspeed"] = hist["pitch_type"].isin(OFFSPEED)
+    hist["is_whiff"]    = hist["description"].isin(WHIFF_CODE)
+
+    return (
+        hist.groupby(["pitcher", "count_situation"])
+        .agg(
+            pitcher_sit_n          = ("pitch_type", "size"),
+            pitcher_sit_fb_rate    = ("is_fastball", "mean"),
+            pitcher_sit_br_rate    = ("is_breaking", "mean"),
+            pitcher_sit_os_rate    = ("is_offspeed", "mean"),
+            pitcher_sit_whiff_rate = ("is_whiff", "mean"),
+        )
+        .reset_index()
+    )
+
+
+def batter_situation_lookup(df: pd.DataFrame) -> pd.DataFrame:
+    hist = df[["batter", "balls", "strikes", "pitch_type", "description"]].copy()
+    hist["count_situation"] = hist.apply(
+        lambda r: count_situation(int(r["balls"]), int(r["strikes"])), axis=1
+    )
+    hist["is_swing"] = hist["description"].isin(SWING_CODE)
+    hist["is_whiff"] = hist["description"].isin(WHIFF_CODE)
+
+    return (
+        hist.groupby(["batter", "count_situation"])
+        .agg(
+            batter_sit_n           = ("pitch_type", "size"),
+            batter_sit_swing_rate  = ("is_swing", "mean"),
+            batter_sit_whiff_rate  = ("is_whiff", "mean"),
+        )
+        .reset_index()
+    )
+
+
 def add_pitcher_count_split_features(df: pd.DataFrame) -> pd.DataFrame:
-    """ 
+    """
     Adds
     pitcher_sit_fb_rate    Fastball rate when pitcher is in this situation
     pitcher_sit_br_rate    Breaking rate
@@ -73,27 +115,7 @@ def add_pitcher_count_split_features(df: pd.DataFrame) -> pd.DataFrame:
                         "pitcher_sit_os_rate", "pitcher_sit_whiff_rate"]
     out = out.drop(columns=[c for c in pitcher_sit_cols if c in out.columns])
 
-    hist = df[["pitcher", "balls", "strikes", "pitch_type", "description"]].copy()
-    hist["count_situation"] = hist.apply(
-        lambda r: count_situation(int(r["balls"]), int(r["strikes"])), axis=1
-    )
-    hist["is_fastball"] = hist["pitch_type"].isin(FASTBALL)
-    hist["is_breaking"] = hist["pitch_type"].isin(BREAKING)
-    hist["is_offspeed"]  = hist["pitch_type"].isin(OFFSPEED)
-    hist["is_whiff"]     = hist["description"].isin(WHIFF_CODE)
-
-    lookup = (
-        hist.groupby(["pitcher", "count_situation"])
-        .agg(
-            pitcher_sit_n          = ("pitch_type", "size"),
-            pitcher_sit_fb_rate    = ("is_fastball", "mean"),
-            pitcher_sit_br_rate    = ("is_breaking", "mean"),
-            pitcher_sit_os_rate    = ("is_offspeed", "mean"),
-            pitcher_sit_whiff_rate = ("is_whiff", "mean"),
-        )
-        .reset_index()
-    )
-
+    lookup = pitcher_situation_lookup(df)
     out = out.merge(lookup, on=["pitcher", "count_situation"], how="left")
     return out
 
@@ -114,23 +136,7 @@ def add_batter_count_split_features(df: pd.DataFrame) -> pd.DataFrame:
     batter_sit_cols = ["batter_sit_n", "batter_sit_swing_rate", "batter_sit_whiff_rate"]
     out = out.drop(columns=[c for c in batter_sit_cols if c in out.columns])
 
-    hist = df[["batter", "balls", "strikes", "pitch_type", "description"]].copy()
-    hist["count_situation"] = hist.apply(
-        lambda r: count_situation(int(r["balls"]), int(r["strikes"])), axis=1
-    )
-    hist["is_swing"] = hist["description"].isin(SWING_CODE)
-    hist["is_whiff"] = hist["description"].isin(WHIFF_CODE)
-
-    lookup = (
-        hist.groupby(["batter", "count_situation"])
-        .agg(
-            batter_sit_n           = ("pitch_type", "size"),
-            batter_sit_swing_rate  = ("is_swing", "mean"),
-            batter_sit_whiff_rate  = ("is_whiff", "mean"),
-        )
-        .reset_index()
-    )
-
+    lookup = batter_situation_lookup(df)
     out = out.merge(lookup, on=["batter", "count_situation"], how="left")
     return out
 
