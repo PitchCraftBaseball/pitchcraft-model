@@ -12,7 +12,7 @@ from .out_type_features import (
     with_out_type_historical_pitch_columns,
 )
 from .parquet import save_training_data
-from pitch_rnn.setup_data import validate_feature_list_file
+from model_shared.feature_list import validate_feature_list_file
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,6 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-pitch_rnn/
 src/
 start_server
 README.md

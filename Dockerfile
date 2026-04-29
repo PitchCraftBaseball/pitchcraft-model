@@ -11,8 +11,12 @@ COPY model_server ./model_server
 
 COPY model_shared ./model_shared
 
+COPY pitch_rnn ./pitch_rnn
+
 COPY rnn_support_models ./rnn_support_models
 
 COPY certs ./certs
+
+RUN python -m model_shared.setup
 
 CMD ["uvicorn", "model_server.src.api:app", "--host", "0.0.0.0", "--port", "8000"]

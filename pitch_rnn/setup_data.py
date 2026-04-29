@@ -18,43 +18,8 @@ import csv
 from pathlib import Path
 import sys
 
-COLUMN_TABLE_OVERRIDES = {
-    "sz_top": "historical_pitches",
-    "sz_bot": "historical_pitches",
-}
-
-from model_shared.db import find_table_for_column, query_table_for_features
-
-"""
-    Validates the fields that are passed by the feature_list file. 
-    Validation fails if at least one of the fields is incorrect.
-    This function assumes that we might query from non-historical data sometime
-    in the future. 
-"""
-def validate_feature_list_file(filename: str):
-    count: int = 0
-    table_to_features_map: dict[str, list[str]] = {}
-    with open(filename, "r") as file: 
-        for feature in file:
-            if (feature[0] == "#"): # * Support for comments in the feature file
-                # print(f"{feature} is currently disabled")
-                continue
-            feature = feature.strip()
-            if feature in COLUMN_TABLE_OVERRIDES:
-                table_name = COLUMN_TABLE_OVERRIDES[feature]
-            else:
-                table_name = find_table_for_column("public", feature)
-            
-            if table_name is None:
-                print(f"Couldn't find a table that contained the feature: {feature}")
-                return None
-            count += 1
-            if table_name in table_to_features_map:
-                table_to_features_map[table_name].append(feature)
-            else: 
-                table_to_features_map[table_name] = [feature]
-    print(f"<feature_file> successfully validated. Feature count: {count}")
-    return table_to_features_map
+from model_shared.db import query_table_for_features
+from model_shared.feature_list import validate_feature_list_file
 
 # we'll want to flush everything to CSV files. For now, I'll write it to multiple
 # by table because I'm not entirely sure if we use columns from other tables
