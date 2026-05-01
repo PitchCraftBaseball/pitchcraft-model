@@ -34,6 +34,7 @@ def data_remapping(data: pd.DataFrame) -> pd.DataFrame:
     pitch_remapping = {
         'SC': 'CU',   # screwball -> curveball family
         'CS': 'CU',   # slow curve -> curveball
+        'FO': 'FS'
     }
 
     out['pitch_type'] = out['pitch_type'].replace(pitch_remapping)
@@ -60,7 +61,7 @@ def drop_unused_cols(data: pd.DataFrame) -> pd.DataFrame:
         "intercept_ball_minus_batter_pos_x_inches", "intercept_ball_minus_batter_pos_y_inches", "Unnamed: 0", 
         "delta_run_exp", "delta_pitcher_run_exp", "batter_days_until_next_game", "api_break_z_with_gravity", "api_break_x_arm", "api_break_x_batter_in", "batter_days_until_next_game",
         "pitcher_days_until_next_game", "batter_days_since_prev_game", "pitcher_days_since_prev_game", "n_priorpa_thisgame_player_at_bat", "n_thruorder_pitcher", 
-        "vx0", "vy0", "vz0", "ax", "ay", "az", "pfx_x", "pfx_z", "release_spin_rate", "spin_axis", "arm_angle", 'release_speed', 'release_pos_x', 'release_pos_z', 'release_extension', 'release_pos_y',
+        "vx0", "vy0", "vz0", "ax", "ay", "az", "release_spin_rate", "spin_axis", "arm_angle", 'release_pos_x', 'release_pos_z', 'release_extension', 'release_pos_y',
         'post_away_score','post_home_score', 'post_bat_score', 'post_fld_score',
     ]
     

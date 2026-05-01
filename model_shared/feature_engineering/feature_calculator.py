@@ -43,8 +43,11 @@ def calculate_game_state_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     # Make base occupancy into bools
-    for base_col in ["on_1b", "on_2b", "on_3b"]:
-        out[base_col] = out[base_col].notna()
+    out["base_state"] = (
+        out["on_1b"].notna().astype(int) * 1 +
+        out["on_2b"].notna().astype(int) * 2 +
+        out["on_3b"].notna().astype(int) * 4
+    )
 
     out['count_state'] = (out['balls'].astype(int).astype(str) + "-" + out['strikes'].astype(int).astype(str))
 

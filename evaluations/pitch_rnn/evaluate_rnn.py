@@ -14,12 +14,14 @@ from model_shared.rnn_definition import PitchRNN
 from model_shared.feature_engineering.pitch_constants import PAD_ID
 from pitch_rnn.sequence_builder import PitchSeqDS
 from pitch_rnn.export_artifacts import *
+from sklearn.calibration import calibration_curve
+import torch.nn.functional as F
 
 # ── Load artifacts ────────────────────────────────────────────────────────────
 
 BASE = Path(__file__).parent.parent  # repo root (one level above pitch_rnn / model_eval)
 
-def load_model_and_vocabs(vocab_path: str, model_path: str, emb_dims, num_layers):
+def load_model_and_vocabs(vocab_path: str, model_path: str, emb_dims, num_layers, hidden):
     cat_vocabs, y_vocab, feature_spec = load_vocabs(vocab_path)
     NUM_COLS = feature_spec["num_cols"]
 
@@ -31,7 +33,8 @@ def load_model_and_vocabs(vocab_path: str, model_path: str, emb_dims, num_layers
         num_features=len(NUM_COLS),
         emb_dims=emb_dims,
         num_classes=num_classes,
-        num_layers=num_layers
+        num_layers=num_layers,
+        hidden=hidden
     )
 
     model.load_state_dict(torch.load(model_path, map_location="cpu"))
@@ -223,6 +226,85 @@ def generate_confusion_matrix(
     plt.show()
     return cm, cm_norm
 
+def generate_calibration_curves(
+    model, test_loader, device, id_to_pitch,
+    arsenal_masks=None, pad_id=PAD_ID,
+    n_bins=5, figsize=(20, 8), save_dir: str = None
+):
+    model.eval()
+    all_logits, all_targets = [], []
+
+    with torch.no_grad():
+        for x_cat, x_num, y in test_loader:
+            x_cat = x_cat.to(device)
+            x_num = x_num.to(device)
+
+            logits = model(x_cat, x_num)
+
+            if arsenal_masks is not None:
+                pitcher_ids = x_cat[:, :, 0]
+                pitch_mask  = arsenal_masks[pitcher_ids].to(device)
+                logits      = logits.masked_fill(pitch_mask == 0, float("-inf"))
+
+            all_logits.append(logits.reshape(-1, logits.size(-1)).cpu())
+            all_targets.append(y.reshape(-1).cpu())
+
+    all_logits  = torch.cat(all_logits, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    # Remove PAD tokens
+    mask        = all_targets != pad_id
+    probs       = F.softmax(all_logits[mask], dim=-1).numpy()
+    targets_np  = all_targets[mask].numpy()
+
+    pitch_ids = sorted(id_to_pitch.keys())
+    n_pitches = len(pitch_ids)
+    cols      = 5
+    rows      = (n_pitches + cols - 1) // cols
+
+    fig, axes = plt.subplots(rows, cols, figsize=figsize)
+    axes      = axes.flatten()
+
+    for i, class_id in enumerate(pitch_ids):
+        ax         = axes[i]
+        pitch_name = id_to_pitch[class_id]
+
+        binary_targets = (targets_np == class_id).astype(int)
+        class_probs    = probs[:, class_id]
+
+        if binary_targets.sum() == 0:
+            ax.set_visible(False)
+            continue
+
+        fraction_pos, mean_pred = calibration_curve(
+            binary_targets, class_probs,
+            n_bins=n_bins, strategy="uniform"
+        )
+
+        ax.plot(mean_pred, fraction_pos, marker="o", color="steelblue", label=pitch_name)
+        ax.plot([0, 1], [0, 1], "k--", label="Perfect")
+        ax.set_title(pitch_name)
+        ax.set_xlabel("Mean Predicted Prob")
+        ax.set_ylabel("Fraction Positive")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    # Hide any unused subplots
+    for j in range(i + 1, len(axes)):
+        axes[j].set_visible(False)
+
+    plt.suptitle("Calibration Curves by Pitch Type", fontsize=14)
+    plt.tight_layout()
+
+    if save_dir is not None:
+        out_path = Path(save_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        filename  = f"calibration_curves_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        save_path = out_path / filename
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        print(f"Calibration curves saved {save_path}")
+
+    plt.show()
 
 # ── Master evaluation ─────────────────────────────────────────────────────────
 
@@ -252,6 +334,14 @@ def evaluate_model_complete(
         save_dir=confusion_matrix_save_dir,
     )
 
+    print("\n6. Calibration Curves:")
+    generate_calibration_curves(
+        model, test_loader, device, id_to_pitch,
+        arsenal_masks=arsenal_masks,
+        pad_id=pad_id,
+        save_dir=confusion_matrix_save_dir,  # saves to same eval output folder
+    )
+
     return {
         "accuracy":                   acc,
         "top3_accuracy":              top3,
@@ -261,7 +351,7 @@ def evaluate_model_complete(
         "confusion_matrix_normalized": cm_norm,
     }
 
-def evaluate_rnn(emb_dims, num_layers, use_arsenal_mask):
+def evaluate_rnn(emb_dims, num_layers, use_arsenal_mask, hidden):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     BASE = Path(__file__).parent.parent.parent  # evaluations/pitch_rnn -> evaluations -> repo root
@@ -277,7 +367,8 @@ def evaluate_rnn(emb_dims, num_layers, use_arsenal_mask):
         vocab_path = vocab_path,
         model_path = model_path,
         emb_dims=emb_dims,
-        num_layers=num_layers
+        num_layers=num_layers,
+        hidden=hidden
     )
     model = model.to(device)
 

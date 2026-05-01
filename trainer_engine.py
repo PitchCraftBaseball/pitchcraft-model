@@ -17,14 +17,15 @@ FEATURE_SPEC = {
     "target": "y_next_pitch_type",
     "cat_cols": [
         "pitcher", "batter", "stand", "p_throws", "inning_topbot",
-        "count_state", "prev_pitch_type", "count_situation",
+        "count_state", "prev_pitch_type", "base_state"
     ],
     "num_cols": [
-        "balls", "strikes", "outs_when_up", "inning", "bat_score_diff",
-        "on_1b", "on_2b", "on_3b",
+        # "balls", "strikes",
+        "outs_when_up", "inning", "bat_score_diff",
         "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
         "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
-        "batter_sit_swing_rate", "batter_sit_whiff_rate",
+        "batter_sit_swing_rate", "batter_sit_whiff_rate", "pitch_number", 
+        "release_speed", "pfx_x", "pfx_z"
     ],
 }
 
@@ -36,17 +37,20 @@ EMB_DIMS = {
     "inning_topbot": 4,
     "count_state": 8,
     "prev_pitch_type": 16,
-    "count_situation": 4,
+    # "count_situation": 4,
+    "base_state": 8,
 }
 
 MODEL_HYPERPARAMETERS = {
-    'smoothing_weights': 0.6,
+    'smoothing_weights': 0.35,
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
-    'stopping_patience': 5,
+    'stopping_patience': 3,
     'stopping_delta': 0.01,
     'batch_size': 64,
+    'dropout': 0.5,
+    'hidden_size': 128
 }
 
 def main():
@@ -77,12 +81,14 @@ def main():
     data = get_rnn_features(data)
     print("Completed Feature Engineering")
 
+    data = data[~data['game_year'].isin([2021, 2022])]
+
     # # Step 4: Send to RNN to be trained 
     rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS)
 
     # Step 5: Send to be trained
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
 
 if __name__ == "__main__":
-    main()
-    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True)
+    #main()
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True, hidden=MODEL_HYPERPARAMETERS['hidden_size'])

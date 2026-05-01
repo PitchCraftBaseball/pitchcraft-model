@@ -4,6 +4,7 @@ import torch
 import json
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from pathlib import Path
 from model_shared.feature_engineering.pitch_constants import *
 from model_shared.feature_engineering.feature_calculator import pitch_to_family, add_batter_count_split_features, add_pitcher_count_split_features, calculate_game_state_features
@@ -63,14 +64,20 @@ def split_by_pa_id(df: pd.DataFrame, pa_col="pa_id", ratios=(0.8, 0.2), seed: in
 
     return train_df, test_df, train_ids, test_ids
 
-def split_by_year(df: pd.DataFrame, test_year: int = 2025, pa_col: str = "pa_id") -> tuple:
-    train_df = df[df["game_year"] < test_year].copy()
+def split_by_year(df: pd.DataFrame, test_year: int = 2025, train_start_year: int = None, pa_col: str = "pa_id") -> tuple:
+    train_df = df[(df["game_year"] < test_year)]
+    
+    if train_start_year is not None:
+        train_df = train_df[train_df["game_year"] >= train_start_year]
+    
+    train_df = train_df.copy()
     test_df  = df[df["game_year"] == test_year].copy()
 
     train_ids = set(train_df[pa_col].dropna().unique())
     test_ids  = set(test_df[pa_col].dropna().unique())
 
-    print(f"Train: {len(train_df):,} rows ({df['game_year'].min()}-{test_year - 1})")
+    actual_start = train_df["game_year"].min()
+    print(f"Train: {len(train_df):,} rows ({actual_start}-{test_year - 1})")
     print(f"Test:  {len(test_df):,} rows ({test_year})")
 
     return train_df, test_df, train_ids, test_ids
@@ -151,7 +158,7 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
 
     return masks
 
-def train_model(model, train_loader, test_loader, criterion, optimizer, early_stopping, device, num_classes):
+def train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, early_stopping, device, num_classes):
     epochs = 20
     for epoch in range(epochs):
         model.train()
@@ -169,6 +176,7 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, early_st
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             train_loss += loss.item() * x_cat.size(0)
@@ -195,12 +203,31 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, early_st
 
         print(f'Epoch {epoch+1}, Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}')
 
+        scheduler.step(test_loss)
         early_stopping(test_loss, model)
         if early_stopping.early_stop:
             print("Early Stopping")
             break
 
     early_stopping.load_best_model(model)
+
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, weight=None, ignore_index=0):
+        super().__init__()
+        self.gamma = gamma
+        self.weight = weight
+        self.ignore_index = ignore_index
+
+    def forward(self, logits, targets):
+        ce_loss = F.cross_entropy(
+            logits, targets,
+            weight=self.weight,
+            ignore_index=self.ignore_index,
+            reduction="none"
+        )
+        pt = torch.exp(-ce_loss)  # probability of correct class
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        return focal_loss.mean()
 
 def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, model_params):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -210,19 +237,20 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     NUM_COLS = feature_spec["num_cols"]
 
     data_train = calculate_target_variable(data)
+    print("After Target Feature:", data_train.shape)
 
     train_df, test_df, train_ids, test_ids = split_by_year(
-        data_train, test_year=2025
-    )   
-    print("Split Training Data")
+        data_train, test_year=2025, train_start_year=2023
+    )
+    print("Split Training Data (train)", train_df.shape)
+    print("Split Training Data (test)", test_df.shape)
     
-
     train_df = calculate_game_state_features(train_df)
     test_df  = calculate_game_state_features(test_df)
 
     train_df = add_pitcher_count_split_features(train_df)
     train_df = add_batter_count_split_features(train_df)
-
+    
     test_df = apply_pitcher_lookup(train_df, test_df)
     test_df = apply_batter_lookup(train_df, test_df)
 
@@ -246,22 +274,42 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     print("Loaded Data")
 
     class_weights = calculate_class_weights(Y_tr, num_classes, PAD_ID, model_params['smoothing_weights'])
+    inv_y_vocab = {v: k for k, v in y_vocab.items()}
+    for class_id, w in enumerate(class_weights):
+        if w > 0:
+            print(f"  {inv_y_vocab.get(class_id, 'PAD')}: {w:.4f}")
 
     model = PitchRNN(
         cat_vocab_sizes=cat_vocab_sizes,
         num_features=len(NUM_COLS),
         emb_dims=custom_emb_dims,
+        hidden=model_params['hidden_size'],
         num_classes=num_classes,
-        num_layers=model_params['model_layers']
+        dropout=model_params['dropout'], 
+        num_layers=model_params['model_layers'],
     )
 
     model = model.to(device)
 
-    criterion = nn.CrossEntropyLoss(ignore_index=PAD_ID, weight=class_weights.to(device))
-    optimizer = optim.Adam(model.parameters(), lr=model_params['optimizer_lr'])
+    criterion = FocalLoss(gamma=1.5, weight=class_weights.to(device), ignore_index=PAD_ID)
+    optimizer = optim.Adam(model.parameters(), lr=model_params['optimizer_lr'], weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', patience=2, factor=0.5,
+    )
     early_stopping = EarlyStopping(patience=model_params['stopping_patience'], delta=model_params['stopping_delta'])
 
-    train_model(model, train_loader, test_loader, criterion, optimizer, early_stopping, device, num_classes)
+    # Baseline: what accuracy do you get predicting the most common pitch every time?
+    most_common = train_df["y_next_pitch_type"].value_counts().index[0]
+    baseline_acc = (test_df["y_next_pitch_type"] == most_common).mean()
+    print(f"Naive baseline: {baseline_acc:.4f}")
+
+    # Also try: predict based on pitcher's own most common pitch
+    pitcher_most_common = train_df.groupby("pitcher")["y_next_pitch_type"].agg(lambda x: x.value_counts().index[0])
+    test_df["pitcher_baseline"] = test_df["pitcher"].map(pitcher_most_common)
+    pitcher_baseline_acc = (test_df["y_next_pitch_type"] == test_df["pitcher_baseline"]).mean()
+    print(f"Pitcher-frequency baseline: {pitcher_baseline_acc:.4f}")
+
+    train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, early_stopping, device, num_classes)
 
     export_model(model)
     export_vocabs(cat_vocabs, y_vocab, feature_spec)
