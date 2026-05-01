@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 import numpy as np
 import torch
 import logging
+import json 
+from pathlib import Path
 
 from model_shared.feature_engineering.feature_calculator import count_situation
 from model_shared.transition_inference import predict_pitch_transition_outcome
@@ -18,6 +20,11 @@ from .pitch_state_builder import build_pitch_state_from_features, MissingFeature
 from .pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
 from .players_accessor import fetch_handedness
 
+COMPOSITE_CONFIG = {
+    "rnn_weight": 1, 
+    "out_type_weight": 1,
+    "run_expectancy_weight": 1
+}
 
 Strategy = Literal["argmax", "sample"]
 
@@ -114,8 +121,14 @@ class InferenceEngine:
                 batter_side=batter_side,
                 pitcher_arm=pitcher_arm,
             )
-            chosen_pitch = self._resolve_event(rnn_pitch_probs, strategy, rng)
+            
+            # chosen_pitch = self._resolve_event(rnn_pitch_probs, strategy, rng)
 
+            """
+            for each output in rnn_pitch_probs, 1) predict transition_probs 2) predict_pitch_out_type_outcome 3) apply composite equation 
+            then at the end we'll just pick the pitch that has the highest composite score
+            """
+            
             game_context = self._build_game_context(
                 state_features=state_features,
                 balls=balls,
@@ -144,9 +157,12 @@ class InferenceEngine:
                 game_context=game_context,
                 zone=zone,
             )
-
-            logger.debug("out_type_raw:")
-            logger.debug(out_type_raw)
+            
+            # TODO: add RE here 
+            
+            
+            # logger.debug("out_type_raw:")
+            # logger.debug(out_type_raw)
 
             out_type_probs = {
                 k: float(np.asarray(v).item()) for k, v in out_type_raw.items()
@@ -158,7 +174,8 @@ class InferenceEngine:
             transition_event = self._resolve_event(
                 {"strike": p_strike, "ball": p_ball}, strategy, rng
             )
-
+            
+            # override this with strategy 
             out_type_event = self._resolve_event(
                 out_type_probs,
                 strategy,
@@ -242,13 +259,42 @@ class InferenceEngine:
             probs, self.artifacts, seq_len, pitch_keys=["pitch_one"]
         )
         return pitch_dist["pitch_one"]
-
+    
+    def parse_re288_pitch_results(outs, first_base, second_base, third_base, balls, strikes, pitch_classification):
+        base_key = f"{'O' if first_base else 'X'}{'O' if second_base else 'X'}{'O' if third_base else 'X'}"
+        count_key = f"{balls}-{strikes}"   
+        
+        json_path = Path(__file__).resolve().parent / "re288.json"
+        
+        with (open(json_path), "r") as file: 
+            data = json.load(file)
+            
+        data.get()
+    
+    def _calculate_power_mean(rnn_score, out_type_score, run_expectancy_score,
+                              rnn_weight, out_type_weight, run_expectancy_weight, p): 
+        adj_re_score = 1 / (1 + run_expectancy_score)
+        if p == 0:
+            # Geometric mean
+            product = (rnn_score ** rnn_weight) * (out_type_score ** out_type_weight) * (adj_re_score ** run_expectancy_weight)
+            return product
+        # if p == 1, it is the weighted arithmetic mean
+        # if p approaches infinity, it approaches the maximum score among the three
+        # if p approaches negative infinity, it approaches the minimum score among the three
+        weighted_sum = (rnn_weight * (rnn_score ** p)) + (out_type_weight * (out_type_score ** p)) + (run_expectancy_weight * (adj_re_score ** p))
+        return weighted_sum ** (1/p)
+    
     @staticmethod
     def _resolve_event(
         probs: Dict[str, float],
         strategy: Strategy,
         rng: Optional[np.random.Generator],
+        optimal_out: str = None 
     ) -> str:
+        
+        if strategy == "optimal_out": 
+            return -1
+        
         if strategy == "argmax":
             return max(probs, key=probs.get)
         if strategy == "sample":
