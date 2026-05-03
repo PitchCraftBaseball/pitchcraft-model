@@ -96,9 +96,6 @@ class InferenceEngine:
         balls = int(state_features["balls"])
         strikes = int(state_features["strikes"])
         prev_pitch_type = state_features.get("prev_pitch_type", "START")
-        # None breaks xgboost (object dtype); 0 is effectively the same.
-        zone_raw = state_features.get("zone")
-        zone = int(zone_raw) if zone_raw is not None else 0
 
         sequence: List[PitchStep] = []
         outcome: Optional[str] = None
@@ -131,7 +128,7 @@ class InferenceEngine:
                 pitch_type=chosen_pitch,
                 year=year,
                 game_context=game_context,
-                zone=zone,
+                location=None, # TODO: pass new location zone
             )
             p_strike = float(transition_probs["p_strike"][0])
             p_ball = float(transition_probs["p_ball"][0])
@@ -142,7 +139,7 @@ class InferenceEngine:
                 pitch_type=chosen_pitch,
                 year=year,
                 game_context=game_context,
-                zone=zone,
+                location=None, # TODO: pass new location zone
             )
 
             logger.debug("out_type_raw:")
@@ -271,12 +268,6 @@ class InferenceEngine:
         pitcher_arm: str,
         prev_pitch_type: str,
     ) -> Dict[str, Any]:
-        # Translate the API's `bat_score_diff` and `on_*` fields into the
-        # column names the support models were trained on.
-        bat_score_diff = int(state_features.get("bat_score_diff", 0))
-        bat_score = bat_score_diff if bat_score_diff > 0 else 0
-        fld_score = -bat_score_diff if bat_score_diff < 0 else 0
-
         return {
             "balls": balls,
             "strikes": strikes,
@@ -284,14 +275,12 @@ class InferenceEngine:
             "p_throws": pitcher_arm,
             "inning": int(state_features["inning"]),
             "inning_topbot": state_features["inning_topbot"],
-            "bat_score": bat_score,
-            "fld_score": fld_score,
-            "runner_on_1b": int(bool(state_features.get("on_1b", 0))),
-            "runner_on_2b": int(bool(state_features.get("on_2b", 0))),
-            "runner_on_3b": int(bool(state_features.get("on_3b", 0))),
+            "bat_score_diff": int(state_features.get("bat_score_diff", 0)),
+            "on_1b": int(bool(state_features.get("on_1b", 0))),
+            "on_2b": int(bool(state_features.get("on_2b", 0))),
+            "on_3b": int(bool(state_features.get("on_3b", 0))),
             "outs_when_up": int(state_features["outs_when_up"]),
             "prev_pitch_type": prev_pitch_type,
-            "prev_zone": int(state_features.get("prev_zone", 0)),
         }
 
     @staticmethod
