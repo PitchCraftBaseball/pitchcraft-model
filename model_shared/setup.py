@@ -38,6 +38,23 @@ _ZONE_METRICS = (
     "swing_percentage",
 )
 
+_LOC_METRICS = (
+    "batting_average",
+    "average_exit_velocity",
+    "average_launch_angle",
+    "contact_batting_average",
+    "hard_hit_bip_percentage",
+    "strikeout_percentage",
+    "whiff_percentage",
+    "walk_percentage",
+    "ground_ball_percentage",
+    "line_drive_percentage",
+    "fly_ball_percentage",
+    "popup_percentage",
+    "swing_percentage",
+    "foul_percentage"
+)
+
 _SUPPORT_TABLE_QUERIES: dict[str, tuple[str, tuple]] = {
     "batted_ball_profile": (
         """
@@ -99,6 +116,17 @@ _SUPPORT_TABLE_QUERIES: dict[str, tuple[str, tuple]] = {
         FROM players
         """,
         (),
+    ),
+    "location_metrics": (
+        """
+        SELECT player_id, position, year, metric, 
+               loc1, loc2, loc3, loc4, loc5, loc6,
+               loc7, loc8
+        FROM location_metrics
+        WHERE year BETWEEN %s AND %s
+          AND metric = ANY(%s::zone_metric_type[])
+        """,
+        (_SUPPORT_TABLE_START_YEAR, _SUPPORT_TABLE_END_YEAR, list(_LOC_METRICS)),
     ),
 }
 

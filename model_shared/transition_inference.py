@@ -17,26 +17,15 @@ import pandas as pd
 
 from . import feature_tables
 
-# Columns that need to be divided by 100 after fetch (DB stores them on a
-# 0-100 scale; the models were trained on 0-1).
-SQL_PCT_COLS = {
-    'batter_prev_whiff_rate', 'batter_prev_chase_rate', 'batter_prev_looking_strike_rate',
-    'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
-    'batter_pitch_whiff_rate', 'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate',
-    'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
-    'batter_prev_first_pitch_swing_rate', 'pitcher_prev_first_pitch_swing_rate',
-    'batter_prev_meatball_swing_rate', 'pitcher_prev_meatball_swing_rate'
-}
-
-ZONE_METRICS = [
-    'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage'
+LOC_METRICS = [
+    'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage', 'foul_percentage'
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MODELS_DIR = _REPO_ROOT / "rnn_support_models" / "transition_model" / "models"
 
-stage1_data = joblib.load(_MODELS_DIR / 'swing_model_v1.pkl')
-stage2_data = joblib.load(_MODELS_DIR / 'called_strike_model_v1.pkl')
+stage1_data = joblib.load(_MODELS_DIR / 'swing_model_v2.pkl')
+stage2_data = joblib.load(_MODELS_DIR / 'called_strike_model_v2.pkl')
 
 swing_model = stage1_data['model']
 swing_features = stage1_data['features']
@@ -92,7 +81,7 @@ def build_transition_features_from_parquet(
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    zone: int = None,
+    location: int = None,
 ) -> Dict[str, Any]:
     batter_prev_raw = feature_tables.fetch_player_transition_historical_features(
         batter_id, year, pitch_type, is_batter=True,
@@ -100,26 +89,26 @@ def build_transition_features_from_parquet(
     pitcher_prev_raw = feature_tables.fetch_player_transition_historical_features(
         pitcher_id, year, pitch_type, is_batter=False,
     )
-    batter_zone_raw = feature_tables.fetch_player_zone_features(
-        batter_id, year, is_batter=True, metrics=ZONE_METRICS,
+    batter_loc_raw = feature_tables.fetch_player_location_features(
+        batter_id, year, is_batter=True, metrics=LOC_METRICS,
     )
-    pitcher_zone_raw = feature_tables.fetch_player_zone_features(
-        pitcher_id, year, is_batter=False, metrics=ZONE_METRICS,
+    pitcher_loc_raw = feature_tables.fetch_player_location_features(
+        pitcher_id, year, is_batter=False, metrics=LOC_METRICS,
     )
 
     raw: Dict[str, Any] = {}
 
     rename_cols = {
-        'whiff_percentage': 'whiff_rate',
-        'chase_percentage': 'chase_rate',
-        'zone_contact_percentage': 'zone_contact_rate',
-        'first_pitch_swing_percentage': 'first_pitch_swing_rate',
-        'meatball_swing_percentage': 'meatball_swing_rate',
+        'whiff_percentage': 'whiff_percentage',
+        'chase_percentage': 'chase_percentage',
+        'zone_contact_percentage': 'zone_contact_percentage',
+        'first_pitch_swing_percentage': 'first_pitch_swing_percentage',
+        'meatball_swing_percentage': 'meatball_swing_percentage',
     }
 
     pitch_rename_cols = {
-        'putaway_percentage': 'putaway_rate',
-        'pitch_whiff_percentage': 'whiff_rate',
+        'putaway_percentage': 'putaway_percentage',
+        'pitch_whiff_percentage': 'whiff_percentage',
     }
 
     def _remap_stats(raw_dict, prefix):
@@ -137,26 +126,20 @@ def build_transition_features_from_parquet(
     _remap_stats(batter_prev_raw, 'batter')
     _remap_stats(pitcher_prev_raw, 'pitcher')
 
-    def _map_zone(zone_dict, prefix, target_zone):
-        if target_zone is None or zone_dict is None:
+    def _map_loc(loc_dict, prefix, target_loc):
+        if target_loc is None or loc_dict is None:
             return
 
-        for metric in ZONE_METRICS:
-            remapped = f'{prefix}_zone_{metric}'
-            raw[remapped] = zone_dict.get(f'{metric}_zone{target_zone}')
+        for metric in LOC_METRICS:
+            remapped = f'{prefix}_loc_{metric}'
+            raw[remapped] = loc_dict.get(f'{metric}_zone{target_loc}')
 
-    _map_zone(batter_zone_raw, 'batter', zone)
-    _map_zone(pitcher_zone_raw, 'pitcher', zone)
+    _map_loc(batter_loc_raw, 'batter', location)
+    _map_loc(pitcher_loc_raw, 'pitcher', location)
 
     batter_zone_pct = float(batter_prev_raw.get('zone_percentage') or 0)
     batter_swing_pct = float(batter_prev_raw.get('zone_swing_percentage') or 0)
-    raw['batter_prev_looking_strike_rate'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
-
-    for col in SQL_PCT_COLS:
-        if col in raw and raw[col] is not None:
-            raw[col] = float(raw[col]) / 100.0
-        else:
-            raw[col] = 0.0
+    raw['batter_prev_looking_strike_percentage'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
 
@@ -167,20 +150,20 @@ def predict_pitch_transition_outcome(
     pitch_type: str,
     year: int,
     game_context: Dict[str, Any],
-    zone: int = None,
+    location: int = None,
 ) -> Dict[str, float]:
     parquet_features = build_transition_features_from_parquet(
         batter_id,
         pitcher_id,
         pitch_type,
         year,
-        zone=zone,
+        location=location,
     )
 
     full_features = {**parquet_features, **game_context}
 
     full_features['pitch_type'] = pitch_type
-    full_features['zone'] = zone
+    full_features['location'] = location
 
     df = pd.DataFrame([full_features])
     probs = build_pitch_result_probabilities(df)

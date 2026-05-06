@@ -6,34 +6,21 @@ import pandas as pd
 
 from model_shared import feature_tables
 
-# Columns that need to be divided by 100 after fetch (DB stores them on a
-# 0-100 scale; the models were trained on 0-1).
-SQL_PCT_COLS = {
-    'batter_prev_fb_rate', 'batter_prev_gb_rate', 'batter_prev_whiff_rate',
-    'batter_prev_chase_rate', 'batter_prev_weak_rate', 'batter_prev_under_rate',
-    'batter_prev_topped_rate', 'batter_prev_flareburner_rate', 'batter_prev_solid_rate', 'batter_prev_barrel_rate',
-    'batter_prev_barrels_per_pa', 'batter_prev_looking_strike_rate',
-    'batter_prev_zone_contact_rate', 'batter_pitch_putaway_rate',
-    'batter_pitch_whiff_rate', 'pitcher_prev_fb_rate', 'pitcher_prev_gb_rate',
-    'pitcher_prev_whiff_rate', 'pitcher_prev_chase_rate', 'pitcher_prev_weak_rate',
-    'pitcher_prev_under_rate', 'pitcher_prev_topped_rate', 'pitcher_prev_flareburner_rate', 'pitcher_prev_solid_rate', 'pitcher_prev_barrel_rate',
-    'pitcher_prev_barrels_per_pa', 'pitcher_pitch_putaway_rate', 'pitcher_pitch_whiff_rate',
-}
 
-ZONE_METRICS = [
+LOC_METRICS = [
     'batting_average', 'average_exit_velocity',
     'average_launch_angle', 'contact_batting_average',
     'hard_hit_bip_percentage', 'expected_batting_average',
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
-    'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage'
+    'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage', 'foul_percentage'
 ]
 
 _MODELS_DIR = Path(__file__).parent / 'models'
 
-stage1_data = joblib.load(_MODELS_DIR / 'pa_end_model_v1.pkl')
-stage2_data = joblib.load(_MODELS_DIR / 'so_model_v1.pkl')
-stage3_data = joblib.load(_MODELS_DIR / 'bip_model_v1.pkl')
-stage4_data = joblib.load(_MODELS_DIR / 'fb_model_v1.pkl')
+stage1_data = joblib.load(_MODELS_DIR / 'pa_end_model_v2.pkl')
+stage2_data = joblib.load(_MODELS_DIR / 'so_model_v2.pkl')
+stage3_data = joblib.load(_MODELS_DIR / 'bip_model_v2.pkl')
+stage4_data = joblib.load(_MODELS_DIR / 'fb_model_v2.pkl')
 
 pa_end_model = stage1_data['model']
 pa_end_features = stage1_data['features']
@@ -105,7 +92,7 @@ def build_out_type_features_from_parquet(
     pitcher_id: str,
     pitch_type: str,
     year: int,
-    zone: int = None,
+    location: int = None,
 ) -> Dict[str, Any]:
     batter_prev_raw = feature_tables.fetch_player_out_type_historical_features(
         batter_id, year, pitch_type, is_batter=True,
@@ -113,26 +100,26 @@ def build_out_type_features_from_parquet(
     pitcher_prev_raw = feature_tables.fetch_player_out_type_historical_features(
         pitcher_id, year, pitch_type, is_batter=False,
     )
-    batter_zone_raw = feature_tables.fetch_player_zone_features(
-        batter_id, year, is_batter=True, metrics=ZONE_METRICS,
+    batter_loc_raw = feature_tables.fetch_player_location_features(
+        batter_id, year, is_batter=True, metrics=LOC_METRICS,
     )
-    pitcher_zone_raw = feature_tables.fetch_player_zone_features(
-        pitcher_id, year, is_batter=False, metrics=ZONE_METRICS,
+    pitcher_loc_raw = feature_tables.fetch_player_location_features(
+        pitcher_id, year, is_batter=False, metrics=LOC_METRICS,
     )
 
     raw: Dict[str, Any] = {}
 
     rename_cols = {
-        'ground_ball_percentage': 'gb_rate',
-        'air_ball_percentage': 'fb_rate',
-        'whiff_percentage': 'whiff_rate',
-        'chase_percentage': 'chase_rate',
-        'weak_percentage': 'weak_rate',
-        'under_percentage': 'under_rate',
-        'topped_percentage': 'topped_rate',
-        'flareburner_percentage': 'flareburner_rate',
-        'solid_percentage': 'solid_rate',
-        'barrel_percentage': 'barrel_rate',
+        'ground_ball_percentage': 'gb_percentage',
+        'air_ball_percentage': 'fb_percentage',
+        'whiff_percentage': 'whiff_percentage',
+        'chase_percentage': 'chase_percentage',
+        'weak_percentage': 'weak_percentage',
+        'under_percentage': 'under_percentage',
+        'topped_percentage': 'topped_percentage',
+        'flareburner_percentage': 'flareburner_percentage',
+        'solid_percentage': 'solid_percentage',
+        'barrel_percentage': 'barrel_percentage',
         'barrels_per_pa': 'barrels_per_pa',
         'zone_contact_percentage': 'zone_contact_rate',
     }
@@ -140,7 +127,7 @@ def build_out_type_features_from_parquet(
     pitch_rename_cols = {
         'batting_average': 'batting_average',
         'putaway_percentage': 'putaway_rate',
-        'pitch_whiff_percentage': 'whiff_rate',
+        'pitch_whiff_percentage': 'whiff_percentage',
         'average_launch_angle': 'average_launch_angle',
         'average_exit_velocity': 'average_exit_velocity',
         'expected_batting_average': 'expected_batting_average',
@@ -162,37 +149,31 @@ def build_out_type_features_from_parquet(
     _remap_stats(batter_prev_raw, 'batter')
     _remap_stats(pitcher_prev_raw, 'pitcher')
 
-    def _map_zone(zone_dict, prefix, target_zone):
-        if target_zone is None or zone_dict is None:
+    def _map_loc(loc_dict, prefix, target_loc):
+        if target_loc is None or loc_dict is None:
             return
 
-        for metric in ZONE_METRICS:
-            remapped = f'{prefix}_zone_{metric}'
-            raw[remapped] = zone_dict.get(f'{metric}_zone{target_zone}')
+        for metric in LOC_METRICS:
+            remapped = f'{prefix}_loc_{metric}'
+            raw[remapped] = loc_dict.get(f'{metric}_loc{target_loc}')
 
-    _map_zone(batter_zone_raw, 'batter', zone)
-    _map_zone(pitcher_zone_raw, 'pitcher', zone)
+    _map_loc(batter_loc_raw, 'batter', location)
+    _map_loc(pitcher_loc_raw, 'pitcher', location)
 
     batter_zone_pct = float(batter_prev_raw.get('zone_percentage') or 0)
     batter_swing_pct = float(batter_prev_raw.get('zone_swing_percentage') or 0)
-    raw['batter_prev_looking_strike_rate'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
+    raw['batter_prev_looking_strike_percentage'] = batter_zone_pct * (1 - batter_swing_pct / 100.0)
 
-    raw['batter_zone_fly_ball_rate'] = (
-        float(raw.get('batter_zone_line_drive_percentage') or 0) +
-        float(raw.get('batter_zone_fly_ball_percentage') or 0) +
-        float(raw.get('batter_zone_popup_percentage') or 0)
+    raw['batter_loc_fly_ball_percentage'] = (
+        float(raw.get('batter_loc_line_drive_percentage') or 0) +
+        float(raw.get('batter_loc_fly_ball_percentage') or 0) +
+        float(raw.get('batter_loc_popup_percentage') or 0)
     )
-    raw['pitcher_zone_fly_ball_rate'] = (
-        float(raw.get('pitcher_zone_line_drive_percentage') or 0) +
-        float(raw.get('pitcher_zone_fly_ball_percentage') or 0) +
-        float(raw.get('pitcher_zone_popup_percentage') or 0)
+    raw['pitcher_loc_fly_ball_percentage'] = (
+        float(raw.get('pitcher_loc_line_drive_percentage') or 0) +
+        float(raw.get('pitcher_loc_fly_ball_percentage') or 0) +
+        float(raw.get('pitcher_loc_popup_percentage') or 0)
     )
-
-    for col in SQL_PCT_COLS:
-        if col in raw and raw[col] is not None:
-            raw[col] = float(raw[col]) / 100.0
-        else:
-            raw[col] = 0.0
 
     return {k: (float(v) if v is not None else 0.0) for k, v in raw.items()}
 
@@ -203,20 +184,20 @@ def predict_pitch_out_type_outcome(
     pitch_type: str,
     year: int,
     game_context: Dict[str, any],
-    zone: int = None,
+    location: int = None,
 ) -> Dict[str, float]:
     parquet_features = build_out_type_features_from_parquet(
         batter_id,
         pitcher_id,
         pitch_type,
         year,
-        zone,
+        location,
     )
 
     full_features = {**parquet_features, **game_context}
 
     full_features['pitch_type'] = pitch_type
-    full_features['zone'] = zone
+    full_features['location'] = location
 
     df = pd.DataFrame([full_features])
     probs = build_out_type_probabilities(df)
