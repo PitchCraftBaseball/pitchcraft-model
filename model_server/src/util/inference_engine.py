@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
+import random
 import numpy as np
 import torch
 import logging
@@ -122,13 +123,15 @@ class InferenceEngine:
                 prev_pitch_type=prev_pitch_type,
             )
 
+            random_location = random.randint(1, 8) # TODO: this is temp, change when we have recommended
+
             transition_probs = predict_pitch_transition_outcome(
                 batter_id=batter,
                 pitcher_id=pitcher,
                 pitch_type=chosen_pitch,
                 year=year,
                 game_context=game_context,
-                location=None, # TODO: pass new location zone
+                location=random_location, # TODO: pass new location zone
             )
             p_strike = float(transition_probs["p_strike"][0])
             p_ball = float(transition_probs["p_ball"][0])
@@ -139,7 +142,7 @@ class InferenceEngine:
                 pitch_type=chosen_pitch,
                 year=year,
                 game_context=game_context,
-                location=None, # TODO: pass new location zone
+                location=random_location, # TODO: pass new location zone
             )
 
             logger.debug("out_type_raw:")
