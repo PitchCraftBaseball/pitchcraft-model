@@ -7,6 +7,8 @@ import random
 import numpy as np
 import torch
 import logging
+import json 
+from pathlib import Path
 
 from model_shared.feature_engineering.feature_calculator import count_situation
 from model_shared.transition_inference import predict_pitch_transition_outcome
@@ -19,6 +21,11 @@ from .pitch_state_builder import build_pitch_state_from_features, MissingFeature
 from .pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
 from .players_accessor import fetch_handedness
 
+COMPOSITE_CONFIG = {
+    "rnn_weight": 1, 
+    "out_type_weight": 1,
+    "run_expectancy_weight": 1
+}
 
 Strategy = Literal["argmax", "sample"]
 
@@ -68,10 +75,14 @@ class InferenceEngine:
     """
 
     def __init__(self, artifacts, rnn, feature_store: FeatureStore) -> None:
-        
+
         self.artifacts = artifacts
         self.rnn = rnn
         self.feature_store = feature_store
+
+        re288_path = Path(__file__).resolve().parent / "re288.json"
+        with open(re288_path, "r") as f:
+            self._re288 = json.load(f)
 
     def simulate_plate_appearance(
         self,
@@ -112,7 +123,6 @@ class InferenceEngine:
                 batter_side=batter_side,
                 pitcher_arm=pitcher_arm,
             )
-            chosen_pitch = self._resolve_event(rnn_pitch_probs, strategy, rng)
 
             game_context = self._build_game_context(
                 state_features=state_features,
@@ -123,42 +133,91 @@ class InferenceEngine:
                 prev_pitch_type=prev_pitch_type,
             )
 
-            random_location = random.randint(1, 8) # TODO: this is temp, change when we have recommended
+            outs = int(state_features["outs_when_up"])
+            on_1b = bool(state_features.get("on_1b", 0))
+            on_2b = bool(state_features.get("on_2b", 0))
+            on_3b = bool(state_features.get("on_3b", 0))
 
-            transition_probs = predict_pitch_transition_outcome(
-                batter_id=batter,
-                pitcher_id=pitcher,
-                pitch_type=chosen_pitch,
-                year=year,
-                game_context=game_context,
-                location=random_location, # TODO: pass new location zone
+            best_score: Optional[float] = None
+            chosen_pitch: Optional[str] = None
+            transition_probs = None
+            out_type_probs: Dict[str, float] = {}
+            p_strike = 0.0
+            p_ball = 0.0
+
+            for candidate_pitch, rnn_score in rnn_pitch_probs.items():
+                random_location = random.randint(1, 8) # TODO: this is temp, delete when we have recommended
+
+                cand_transition_probs = predict_pitch_transition_outcome(
+                    batter_id=batter,
+                    pitcher_id=pitcher,
+                    pitch_type=candidate_pitch,
+                    year=year,
+                    game_context=game_context,
+                    location=random_location, # TODO: pass recommended location when ready
+                )
+                cand_p_strike = float(cand_transition_probs["p_strike"][0])
+                cand_p_ball = float(cand_transition_probs["p_ball"][0])
+
+                cand_out_type_raw = predict_pitch_out_type_outcome(
+                    batter_id=batter,
+                    pitcher_id=pitcher,
+                    pitch_type=candidate_pitch,
+                    year=year,
+                    game_context=game_context,
+                    location=random_location, # TODO: pass recommended location when ready 
+                )
+                cand_out_type_probs = {
+                    k: float(np.asarray(v).item()) for k, v in cand_out_type_raw.items()
+                }
+
+                # TODO: we're gonna select the out type score based on the optimal out type later.. when that implementation gets merged in
+                out_type_score = (
+                    cand_out_type_probs.get("p_so", 0.0)
+                    + cand_out_type_probs.get("p_go", 0.0)
+                    + cand_out_type_probs.get("p_fo", 0.0)
+                )
+
+                re_score = self._lookup_run_expectancy(
+                    outs=outs,
+                    on_1b=on_1b,
+                    on_2b=on_2b,
+                    on_3b=on_3b,
+                    balls=balls,
+                    strikes=strikes,
+                    pitch_classification=candidate_pitch,
+                )
+                if re_score is None:
+                    re_score = 0.5
+
+                composite = self._calculate_power_mean(
+                    rnn_score=rnn_score,
+                    out_type_score=out_type_score,
+                    run_expectancy_score=re_score,
+                    rnn_weight=COMPOSITE_CONFIG["rnn_weight"],
+                    out_type_weight=COMPOSITE_CONFIG["out_type_weight"],
+                    run_expectancy_weight=COMPOSITE_CONFIG["run_expectancy_weight"],
+                    p=1,
+                )
+
+                if best_score is None or composite > best_score:
+                    best_score = composite
+                    chosen_pitch = candidate_pitch
+                    transition_probs = cand_transition_probs
+                    out_type_probs = cand_out_type_probs
+                    p_strike = cand_p_strike
+                    p_ball = cand_p_ball
+
+            logger.debug(
+                "chosen_pitch=%s composite=%.4f out_type_probs=%s",
+                chosen_pitch, best_score, out_type_probs,
             )
-            p_strike = float(transition_probs["p_strike"][0])
-            p_ball = float(transition_probs["p_ball"][0])
-
-            out_type_raw = predict_pitch_out_type_outcome(
-                batter_id=batter,
-                pitcher_id=pitcher,
-                pitch_type=chosen_pitch,
-                year=year,
-                game_context=game_context,
-                location=random_location, # TODO: pass new location zone
-            )
-
-            logger.debug("out_type_raw:")
-            logger.debug(out_type_raw)
-
-            out_type_probs = {
-                k: float(np.asarray(v).item()) for k, v in out_type_raw.items()
-            }
-
-            logger.debug(out_type_probs)
-
 
             transition_event = self._resolve_event(
                 {"strike": p_strike, "ball": p_ball}, strategy, rng
             )
-
+            
+            # override this with strategy; if the strategy is a specific kind of out type event, we don't let _resolve_event() determine what we want to do. BLOCKED still by optimal out type dev 
             out_type_event = self._resolve_event(
                 out_type_probs,
                 strategy,
@@ -242,13 +301,59 @@ class InferenceEngine:
             probs, self.artifacts, seq_len, pitch_keys=["pitch_one"]
         )
         return pitch_dist["pitch_one"]
+    
+    def _lookup_run_expectancy(
+        self,
+        *,
+        outs: int,
+        on_1b: bool,
+        on_2b: bool,
+        on_3b: bool,
+        balls: int,
+        strikes: int,
+        pitch_classification: str,
+    ) -> Optional[float]:
+        base_key = f"{'O' if on_1b else 'X'}{'O' if on_2b else 'X'}{'O' if on_3b else 'X'}"
+        count_key = f"{balls}-{strikes}"
+        node = (
+            self._re288.get(str(outs), {})
+            .get(base_key, {})
+            .get(count_key, {})
+            .get(pitch_classification)
+        )
+        if node is None:
+            logger.debug(
+                "re288 miss: outs=%s base=%s count=%s pitch=%s",
+                outs, base_key, count_key, pitch_classification,
+            )
+            return None
+        return float(node["run_expectancy"])
 
+    @staticmethod
+    def _calculate_power_mean(rnn_score, out_type_score, run_expectancy_score,
+                              rnn_weight, out_type_weight, run_expectancy_weight, p=1):
+        adj_re_score = 1 / (1 + run_expectancy_score)
+        if p == 0:
+            # Geometric mean
+            product = (rnn_score ** rnn_weight) * (out_type_score ** out_type_weight) * (adj_re_score ** run_expectancy_weight)
+            return product
+        # if p == 1, it is the weighted arithmetic mean
+        # if p approaches infinity, it approaches the maximum score among the three
+        # if p approaches negative infinity, it approaches the minimum score among the three
+        weighted_sum = (rnn_weight * (rnn_score ** p)) + (out_type_weight * (out_type_score ** p)) + (run_expectancy_weight * (adj_re_score ** p))
+        return weighted_sum ** (1/p)
+    
     @staticmethod
     def _resolve_event(
         probs: Dict[str, float],
         strategy: Strategy,
         rng: Optional[np.random.Generator],
+        optimal_out: str = None 
     ) -> str:
+        
+        if strategy == "optimal_out": 
+            return -1
+        
         if strategy == "argmax":
             return max(probs, key=probs.get)
         if strategy == "sample":
