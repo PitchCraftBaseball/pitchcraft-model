@@ -4,7 +4,7 @@ WHIFF_CODE = ['swinging_strike', 'foul_tip', 'swinging_strike_blocked']
 
 FASTBALL = {'FF', 'SI', 'FC'}
 BREAKING = {'SL', 'CU', 'KC', 'SV', 'ST'}
-OFFSPEED = {'CH', 'FS', 'FO'}
+OFFSPEED = {'CH', 'FS'}
 
 IGNORE = {"ABS", "PO", "FA", 'EP'}
 

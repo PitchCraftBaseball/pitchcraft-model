@@ -158,6 +158,31 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
 
     return masks
 
+def build_balanced_sampler(Y_train, pad_id=PAD_ID):
+    # Get the first non-PAD target per sequence as the sequence label
+    sequence_labels = []
+    for seq in Y_train:
+        real_targets = seq[seq != pad_id]
+        if len(real_targets) > 0:
+            sequence_labels.append(real_targets[0].item())
+        else:
+            sequence_labels.append(pad_id)
+    
+    sequence_labels = torch.tensor(sequence_labels)
+    
+    # Count class frequencies
+    class_counts = torch.bincount(sequence_labels[sequence_labels != pad_id])
+    
+    # Weight each sequence inversely proportional to its class frequency
+    weights = torch.zeros(len(sequence_labels))
+    for i, label in enumerate(sequence_labels):
+        if label != pad_id:
+            weights[i] = 1.0 / class_counts[label].float()
+    
+    return torch.utils.data.WeightedRandomSampler(
+        weights, len(weights), replacement=True
+    )
+
 def train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, early_stopping, device, num_classes):
     epochs = 20
     for epoch in range(epochs):
@@ -269,7 +294,8 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     Xc_te, Xn_te, Y_te = make_fixed_sequences(test_enc,  feature_spec, max_len=MAX_LEN)
     print("Made Fixed Sequences")
 
-    train_loader = DataLoader(PitchSeqDS(Xc_tr, Xn_tr, Y_tr), batch_size=model_params['batch_size'], shuffle=True)
+    sampler = build_balanced_sampler(Y_tr)
+    train_loader = DataLoader(PitchSeqDS(Xc_tr, Xn_tr, Y_tr), batch_size=model_params['batch_size'], shuffle=sampler)
     test_loader  = DataLoader(PitchSeqDS(Xc_te, Xn_te, Y_te), batch_size=model_params['batch_size'], shuffle=False)
     print("Loaded Data")
 
@@ -314,4 +340,8 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     export_model(model)
     export_vocabs(cat_vocabs, y_vocab, feature_spec)
     export_test_tensors(Xc_te, Xn_te, Y_te)
+    BASE = Path(__file__).parent.parent
+    temp_path = BASE / "model_shared" / "vocab" / "temperature.json"
+    with open(temp_path, "w") as f:
+        json.dump({"temperature": 1.0}, f)
 

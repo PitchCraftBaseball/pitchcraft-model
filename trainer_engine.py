@@ -14,7 +14,7 @@ from model_shared.feature_list import validate_feature_list_file
 
 # Eventually this will come from a config file
 FEATURE_SPEC = {
-    "target": "y_next_pitch_type",
+    "target": "y_next_pitch_group",
     "cat_cols": [
         "pitcher", "batter", "stand", "p_throws", "inning_topbot",
         "count_state", "prev_pitch_type", "base_state"
@@ -25,7 +25,6 @@ FEATURE_SPEC = {
         "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
         "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
         "batter_sit_swing_rate", "batter_sit_whiff_rate", "pitch_number", 
-        "release_speed", "pfx_x", "pfx_z"
     ],
 }
 
@@ -46,7 +45,7 @@ MODEL_HYPERPARAMETERS = {
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
-    'stopping_patience': 3,
+    'stopping_patience': 5,
     'stopping_delta': 0.01,
     'batch_size': 64,
     'dropout': 0.5,
@@ -87,8 +86,8 @@ def main():
     rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS)
 
     # Step 5: Send to be trained
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
 
 if __name__ == "__main__":
-    #main()
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=True, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
+    main()
+    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])

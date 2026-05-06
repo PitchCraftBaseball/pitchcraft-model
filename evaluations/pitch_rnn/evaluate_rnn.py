@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from datetime import datetime
 import json
+import torch.nn as nn
 
 from sklearn.metrics import classification_report, confusion_matrix
 from collections import Counter
@@ -88,7 +89,7 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
 
 # ── Prediction helpers ────────────────────────────────────────────────────────
 
-def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID):
+def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature=1.0):
     model.eval()
     all_preds, all_true = [], []
 
@@ -99,6 +100,7 @@ def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=P
             y     = y.to(device)
 
             logits = model(x_cat, x_num)
+            logits = logits / temperature 
 
             if arsenal_masks is not None:
                 pitcher_ids   = x_cat[:, :, 0]
@@ -116,14 +118,14 @@ def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=P
 
 # ── Evaluation functions ──────────────────────────────────────────────────────
 
-def get_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID):
-    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id)
+def get_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature = 1.0):
+    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
     accuracy = 100 * (y_pred == y_true).sum() / len(y_true)
     print(f"Token Accuracy (no PAD): {accuracy:.2f}%")
     return accuracy
 
 
-def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_id=PAD_ID):
+def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_id=PAD_ID, temperature = 1.0):
     model.eval()
     correct, total = 0, 0
 
@@ -134,6 +136,7 @@ def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_
             y     = y.to(device)
 
             logits = model(x_cat, x_num)
+            logits = logits / temperature 
 
             if arsenal_masks is not None:
                 pitcher_ids = x_cat[:, :, 0]
@@ -151,7 +154,7 @@ def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_
     return accuracy
 
 
-def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_masks=None, top_n=5, pad_id=PAD_ID):
+def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_masks=None, top_n=5, pad_id=PAD_ID, temperature=1.0):
     model.eval()
     counts = Counter()
 
@@ -161,6 +164,7 @@ def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_mas
             x_num = x_num.to(device)
 
             logits = model(x_cat, x_num)
+            logits = logits / temperature 
 
             if arsenal_masks is not None:
                 pitcher_ids = x_cat[:, :, 0]
@@ -179,8 +183,8 @@ def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_mas
     return counts.most_common(top_n)
 
 
-def print_classification_report(model, test_loader, device, id_to_pitch, arsenal_masks=None, pad_id=PAD_ID):
-    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id)
+def print_classification_report(model, test_loader, device, id_to_pitch, arsenal_masks=None, pad_id=PAD_ID, temperature = 1.0):
+    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
     labels       = sorted(id_to_pitch.keys())
     target_names = [id_to_pitch[l] for l in labels]
     report = classification_report(y_true, y_pred, labels=labels, target_names=target_names)
@@ -190,9 +194,10 @@ def print_classification_report(model, test_loader, device, id_to_pitch, arsenal
 def generate_confusion_matrix(
     model, test_loader, device, id_to_pitch,
     arsenal_masks=None, pad_id=PAD_ID,
-    figsize=(12, 10), save_dir: str = None
+    figsize=(12, 10), save_dir: str = None,
+    temperature = 1.0
 ):
-    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id)
+    y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
 
     labels      = sorted(id_to_pitch.keys())
     tick_labels = [id_to_pitch[l] for l in labels]
@@ -306,25 +311,106 @@ def generate_calibration_curves(
 
     plt.show()
 
+def find_optimal_temperature(model, test_loader, device, pad_id=PAD_ID):
+    model.eval()
+    all_logits, all_targets = [], []
+
+    with torch.no_grad():
+        for x_cat, x_num, y in test_loader:
+            x_cat = x_cat.to(device)
+            x_num = x_num.to(device)
+
+            logits = model(x_cat, x_num)
+            all_logits.append(logits.reshape(-1, logits.size(-1)).cpu())
+            all_targets.append(y.reshape(-1).cpu())
+
+    all_logits  = torch.cat(all_logits, dim=0)
+    all_targets = torch.cat(all_targets, dim=0)
+
+    # Remove PAD
+    mask        = all_targets != pad_id
+    all_logits  = all_logits[mask]
+    all_targets = all_targets[mask]
+
+    # Learnable temperature parameter
+    temperature = nn.Parameter(torch.ones(1) * 1.5)
+    optimizer   = torch.optim.LBFGS([temperature], lr=0.01, max_iter=100)
+    criterion   = nn.CrossEntropyLoss()
+
+    def eval_step():
+        optimizer.zero_grad()
+        scaled_logits = all_logits / temperature.clamp(min=0.1)
+        loss = criterion(scaled_logits, all_targets)
+        loss.backward()
+        return loss
+
+    optimizer.step(eval_step)
+
+    optimal_temp = temperature.item()
+    return optimal_temp
+
+def get_positional_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature=1.0):
+    model.eval()
+    # Accumulate correct/total per sequence position
+    from collections import defaultdict
+    correct_by_pos = defaultdict(int)
+    total_by_pos   = defaultdict(int)
+
+    with torch.no_grad():
+        for x_cat, x_num, y in test_loader:
+            x_cat = x_cat.to(device)
+            x_num = x_num.to(device)
+            y     = y.to(device)
+
+            logits = model(x_cat, x_num) / temperature  # (batch, seq_len, num_classes)
+
+            if arsenal_masks is not None:
+                pitcher_ids = x_cat[:, :, 0]
+                pitch_mask  = arsenal_masks[pitcher_ids].to(device)
+                logits      = logits.masked_fill(pitch_mask == 0, float("-inf"))
+
+            preds = logits.argmax(dim=-1)  # (batch, seq_len)
+            valid = (y != pad_id)          # (batch, seq_len)
+
+            seq_len = y.size(1)
+            for pos in range(seq_len):
+                mask_pos    = valid[:, pos]
+                correct_pos = (preds[:, pos] == y[:, pos]) & mask_pos
+                correct_by_pos[pos] += correct_pos.sum().item()
+                total_by_pos[pos]   += mask_pos.sum().item()
+
+    print("Positional Accuracy:")
+    print(f"  {'Position':<12} {'Accuracy':>10} {'Sample N':>10}")
+    print(f"  {'-'*34}")
+    results = {}
+    for pos in sorted(correct_by_pos.keys()):
+        if total_by_pos[pos] > 0:
+            acc = 100 * correct_by_pos[pos] / total_by_pos[pos]
+            print(f"  Pitch {pos+1:<6} {acc:>9.2f}%  {total_by_pos[pos]:>9,}")
+            results[pos + 1] = {"accuracy": acc, "n": total_by_pos[pos]}
+
+    return results
+
 # ── Master evaluation ─────────────────────────────────────────────────────────
 
 def evaluate_model_complete(
     model, test_loader, device, id_to_pitch,
     arsenal_masks=None, pad_id=PAD_ID,
     confusion_matrix_save_dir: str = None,
+    temperature: float = 1.0,
 ):
 
     print("\n1. Token Accuracy:")
-    acc = get_accuracy(model, test_loader, device, arsenal_masks, pad_id)
+    acc = get_accuracy(model, test_loader, device, arsenal_masks, pad_id, temperature=temperature)
 
     print("\n2. Top-3 Accuracy:")
-    top3 = get_top_k_accuracy(model, test_loader, device, arsenal_masks, K=3, pad_id=pad_id)
+    top3 = get_top_k_accuracy(model, test_loader, device, arsenal_masks, K=2, pad_id=pad_id, temperature=temperature)
 
     print("\n3. Most Common Predictions:")
-    common = get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_masks, pad_id=pad_id)
+    common = get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_masks, pad_id=pad_id, temperature=temperature)
 
     print("\n4. Detailed Classification Report:")
-    class_report = print_classification_report(model, test_loader, device, id_to_pitch, arsenal_masks, pad_id)
+    class_report = print_classification_report(model, test_loader, device, id_to_pitch, arsenal_masks, pad_id, temperature)
 
     print("\n5. Confusion Matrix:")
     cm, cm_norm = generate_confusion_matrix(
@@ -332,6 +418,7 @@ def evaluate_model_complete(
         arsenal_masks=arsenal_masks,
         pad_id=pad_id,
         save_dir=confusion_matrix_save_dir,
+        temperature=temperature
     )
 
     print("\n6. Calibration Curves:")
@@ -341,6 +428,12 @@ def evaluate_model_complete(
         pad_id=pad_id,
         save_dir=confusion_matrix_save_dir,  # saves to same eval output folder
     )
+    
+    positional_results = get_positional_accuracy(
+        model, test_loader, device,
+        arsenal_masks=arsenal_masks,
+        temperature=temperature
+    )   
 
     return {
         "accuracy":                   acc,
@@ -380,8 +473,16 @@ def evaluate_rnn(emb_dims, num_layers, use_arsenal_mask, hidden):
     else: 
         arsenal_masks = None
 
+    optimal_temp = find_optimal_temperature(model, test_loader, device)
+
+    temp_path = BASE / "model_shared" / "vocab" / "temperature.json"
+    with open(temp_path, "w") as f:
+        json.dump({"temperature": optimal_temp}, f)
+
+    # ── Evaluate with temperature applied ────────────────────────────────────
     evaluate_model_complete(
         model, test_loader, device, id_to_pitch,
         arsenal_masks=arsenal_masks,
+        temperature=optimal_temp,           # ADD THIS
         confusion_matrix_save_dir=f"evaluations/pitch_rnn/eval_output/{stem}",
     )
