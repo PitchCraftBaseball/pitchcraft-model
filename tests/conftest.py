@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+from unittest.mock import patch
 from tests.rnn_support_models.shared.constants import OUT_TYPE_FEATURES, TRANSITION_FEATURES
 
 def generate_mock_value(feature):
@@ -66,3 +67,13 @@ def mock_parquet_df():
             'loc5': 34.7, 'loc6': 40.9, 'loc7': 57.8, 'loc8': 53.3
         }
     ])
+
+
+@pytest.fixture(autouse=True)
+def mock_parquet_reads():
+    with( 
+        patch('model_shared.feature_tables.fetch_player_out_type_historical_features', return_value={}),
+        patch('model_shared.feature_tables.fetch_player_transition_historical_features', return_value={}),
+        patch('model_shared.feature_tables.fetch_player_location_features', return_value={})
+    ):
+        yield

@@ -81,17 +81,12 @@ def test_out_type_missing_game_context_features_raises_exception():
 def test_out_type_correct_location_metric_mapping(mock_parquet_df):
     target_location = 6
 
-    def fake_historical(*args, **kwargs):
-        return {}
-
-
     def fake_location(player_id, year, *, is_batter, metrics):
         row_idx = 1 if is_batter else 0
         row = mock_parquet_df.iloc[row_idx]
         return {f"{row['metric']}_loc{i}": row[f'loc{i}'] for i in range(1, 9)}
 
     with (
-        patch('model_shared.feature_tables.fetch_player_out_type_historical_features', side_effect=fake_historical),
         patch('model_shared.feature_tables.fetch_player_location_features', side_effect=fake_location),
     ):
         result_features = build_out_type_features_from_parquet(
