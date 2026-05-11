@@ -160,7 +160,7 @@ def fetch_player_transition_historical_features(
     return out
 
 
-def fetch_player_zone_features(
+def fetch_player_location_features(
     player_id: str,
     year: int,
     *,
@@ -168,7 +168,7 @@ def fetch_player_zone_features(
     metrics: List[str],
 ) -> Dict[str, Optional[float]]:
     position = "B" if is_batter else "P"
-    df = _load_table("zone_metrics")
+    df = _load_table("location_metrics")
     rows = df[
         (df["_player_id_str"] == str(player_id))
         & (df["year"] == year)
@@ -178,16 +178,16 @@ def fetch_player_zone_features(
     if rows.empty:
         return {}
 
-    zone_cols = [c for c in rows.columns if c.startswith("zone")]
+    loc_cols = [c for c in rows.columns if c.startswith("loc")]
     out: Dict[str, Any] = {}
     for _, row in rows.iterrows():
         metric = row["metric"]
-        for zc in zone_cols:
-            value = row[zc]
+        for lc in loc_cols:
+            value = row[lc]
             if pd.isna(value):
-                out[f"{metric}_{zc}"] = None
+                out[f"{metric}_{lc}"] = None
             else:
-                out[f"{metric}_{zc}"] = value
+                out[f"{metric}_{lc}"] = value
     return out
 
 

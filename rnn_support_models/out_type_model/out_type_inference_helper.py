@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 import joblib
 import pandas as pd
-
+from model_shared.inference_utils import prepare_inference_data
 from model_shared import feature_tables
 
 
@@ -33,23 +33,6 @@ bip_features = stage3_data['features']
 
 fb_model = stage4_data['model']
 fb_features = stage4_data['features']
-
-
-def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
-    cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
-    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
-
-    df['two_strikes'] = (df['strikes'] == 2).astype(int)
-    df['full_count'] = ((df['balls'] == 3) & (df['strikes'] == 2)).astype(int)
-
-    if 'p_throws_R' in df.columns and 'stand_R' in df.columns:
-        df['is_platoon'] = (df['p_throws_R'] != df['stand_R']).astype(int)
-
-    for col in features:
-        if col not in df.columns:
-            df[col] = 0
-
-    return df[features]
 
 
 def build_out_type_probabilities(df: pd.DataFrame) -> Dict[str, float]:
@@ -150,9 +133,6 @@ def build_out_type_features_from_parquet(
     _remap_stats(pitcher_prev_raw, 'pitcher')
 
     def _map_loc(loc_dict, prefix, target_loc):
-        if target_loc is None or loc_dict is None:
-            return
-
         for metric in LOC_METRICS:
             remapped = f'{prefix}_loc_{metric}'
             raw[remapped] = loc_dict.get(f'{metric}_loc{target_loc}')
@@ -186,6 +166,12 @@ def predict_pitch_out_type_outcome(
     game_context: Dict[str, any],
     location: int = None,
 ) -> Dict[str, float]:
+
+    if None in (batter_id, pitcher_id, pitch_type, year):
+        raise ValueError(
+            'batter_id, pitcher_id, pitch_type, and year are all required'
+        )
+
     parquet_features = build_out_type_features_from_parquet(
         batter_id,
         pitcher_id,
