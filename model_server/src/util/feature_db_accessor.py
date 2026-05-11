@@ -110,58 +110,6 @@ def fetch_player_out_type_historical_features(
         _log_player_feature_retrieval(player_id, columns, entity, features)
         return features
 
-def fetch_player_zone_features(
-        player_id: str,
-        year: int,
-        entity: str,
-        is_batter: bool,
-        metrics: list[str],
-) -> Dict [str, Optional[float]]:
-    query = """
-        SELECT
-            player_id,
-            position,
-            metric,
-            zone1,
-            zone2,
-            zone3,
-            zone4,
-            zone5,
-            zone6,
-            zone7,
-            zone8,
-            zone9,
-            zone11,
-            zone12,
-            zone13,
-            zone14
-        FROM zone_metrics
-        WHERE player_id = %s 
-            AND year = %s 
-            AND position = %s
-            AND metric = ANY(%s::zone_metric_type[])
-    """
-    
-    with get_read_cursor() as cursor:
-        cursor.execute(query, (player_id, year, "B" if is_batter else "P", metrics))
-        rows = cursor.fetchall()
-
-        if not rows: 
-            return {}
-        
-        columns = [desc[0] for desc in cursor.description]
-        features = {}
-
-        for row in rows:
-            row_dict = dict(zip(columns, row))
-            metric = row_dict.pop('metric')
-
-            for key, val in row_dict.items():
-                if key.startswith('zone'):
-                    features[f"{metric}_{key}"] = val
-
-        _log_player_feature_retrieval(player_id, list(features.keys()), entity, features)
-        return features
     
 def fetch_player_transition_historical_features(
         player_id: str,
