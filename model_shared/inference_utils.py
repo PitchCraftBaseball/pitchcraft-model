@@ -11,8 +11,9 @@ def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFram
     if 'p_throws_R' in df.columns and 'stand_R' in df.columns:
         df['is_platoon'] = (df['p_throws_R'] != df['stand_R']).astype(int)
 
-    for col in features:
-        if col not in df.columns:
-            df[col] = 0
+    missing_cols = {col: 0 for col in features if col not in df.columns}
+    if missing_cols:
+        missing_df = pd.DataFrame(missing_cols, index=df.index)
+        df = pd.concat([df, missing_df], axis=1)
 
     return df[features]
