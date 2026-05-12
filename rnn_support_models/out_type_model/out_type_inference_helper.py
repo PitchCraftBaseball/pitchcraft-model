@@ -7,13 +7,13 @@ from model_shared.inference_utils import prepare_inference_data
 from model_shared import feature_tables
 
 
-LOC_METRICS = [
+LOC_METRICS = (
     'batting_average', 'average_exit_velocity',
     'average_launch_angle', 'contact_batting_average',
     'hard_hit_bip_percentage', 'expected_batting_average',
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'ground_ball_percentage',
     'line_drive_percentage', 'fly_ball_percentage', 'popup_percentage', 'swing_percentage', 'foul_percentage'
-]
+)
 
 _MODELS_DIR = Path(__file__).parent / 'models'
 
