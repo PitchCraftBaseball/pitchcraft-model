@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -88,6 +88,7 @@ def _rename_pitch_tracking_keys(d: Dict[str, Any]) -> Dict[str, Any]:
     return {_PITCH_TRACKING_RENAMES.get(k, k): v for k, v in d.items()}
 
 
+@lru_cache(maxsize=1024)
 def fetch_player_out_type_historical_features(
     player_id: str,
     year: int,
@@ -125,6 +126,7 @@ def fetch_player_out_type_historical_features(
     return out
 
 
+@lru_cache(maxsize=1024)
 def fetch_player_transition_historical_features(
     player_id: str,
     year: int,
@@ -160,43 +162,13 @@ def fetch_player_transition_historical_features(
     return out
 
 
+@lru_cache(maxsize=1024)
 def fetch_player_location_features(
     player_id: str,
     year: int,
     *,
     is_batter: bool,
-    metrics: List[str],
-) -> Dict[str, Optional[float]]:
-    position = "B" if is_batter else "P"
-    df = _load_table("location_metrics")
-    rows = df[
-        (df["_player_id_str"] == str(player_id))
-        & (df["year"] == year)
-        & (df["position"] == position)
-        & (df["metric"].isin(metrics))
-    ]
-    if rows.empty:
-        return {}
-
-    loc_cols = [c for c in rows.columns if c.startswith("loc")]
-    out: Dict[str, Any] = {}
-    for _, row in rows.iterrows():
-        metric = row["metric"]
-        for lc in loc_cols:
-            value = row[lc]
-            if pd.isna(value):
-                out[f"{metric}_{lc}"] = None
-            else:
-                out[f"{metric}_{lc}"] = value
-    return out
-
-
-def fetch_player_location_features(
-    player_id: str,
-    year: int,
-    *,
-    is_batter: bool,
-    metrics: List[str],
+    metrics: Tuple[str, ...],
 ) -> Dict[str, Optional[float]]:
     position = "B" if is_batter else "P"
     df = _load_table("location_metrics")

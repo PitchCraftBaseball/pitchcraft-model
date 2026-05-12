@@ -17,9 +17,9 @@ import pandas as pd
 from . inference_utils import prepare_inference_data
 from . import feature_tables
 
-LOC_METRICS = [
+LOC_METRICS = (
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage', 'foul_percentage'
-]
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MODELS_DIR = _REPO_ROOT / "rnn_support_models" / "transition_model" / "models"
