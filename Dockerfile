@@ -19,4 +19,4 @@ COPY feature_list feature_list
 
 COPY certs ./certs
 
-CMD ["sh", "-c", "python -m model_shared.setup && exec uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "python -m model_shared.setup && exec uvicorn model_server.src.api:app --host 0.0.0.0 --port 8000 --workers 4"]
