@@ -214,6 +214,7 @@ def generate_confusion_matrix(
         annot=True,
         fmt=".2f",
         ax=ax,
+        annot_kws={"size": 36},
     )
     ax.set_xlabel("Predicted Pitch Type")
     ax.set_ylabel("True Pitch Type")

@@ -15,6 +15,8 @@ COPY pitch_rnn ./pitch_rnn
 
 COPY rnn_support_models ./rnn_support_models
 
+COPY pitch_arsenal ./pitch_arsenal
+
 COPY feature_list feature_list
 
 COPY certs ./certs

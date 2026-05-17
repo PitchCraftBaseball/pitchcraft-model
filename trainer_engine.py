@@ -11,22 +11,50 @@ from model_shared.db import query_historical_pitches_by_year
 from model_shared.parquet import *
 from model_shared.feature_list import validate_feature_list_file
 
+MODEL_TYPE = "group" #group, fastball, breaking or offspeed
 
-# Eventually this will come from a config file
-FEATURE_SPEC = {
-    "target": "y_next_pitch_group",
-    "cat_cols": [
-        "pitcher", "batter", "stand", "p_throws", "inning_topbot",
-        "count_state", "prev_pitch_type", "base_state"
-    ],
-    "num_cols": [
-        # "balls", "strikes",
-        "outs_when_up", "inning", "bat_score_diff",
-        "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
-        "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
-        "batter_sit_swing_rate", "batter_sit_whiff_rate", "pitch_number", 
-    ],
+_BASE_CAT_COLS = [
+    "pitcher", "batter", "stand", "p_throws", "inning_topbot",
+    "count_state", "prev_pitch_type", "base_state", "prev_pitch_group",
+]
+
+_BASE_NUM_COLS = [
+    "outs_when_up", "inning", "bat_score_diff",
+    "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
+    "pitcher_sit_os_rate", "pitcher_sit_whiff_rate",
+    "batter_sit_swing_rate", "batter_sit_whiff_rate",
+]
+
+_FAMILY_NUM_COLS = [
+    "pitcher_family_fb_rate",
+    "pitcher_family_br_rate",
+    "pitcher_family_os_rate",
+]
+
+FEATURE_SPECS = {
+    "group": {
+        "target": "y_next_pitch_group",
+        "cat_cols": _BASE_CAT_COLS,
+        "num_cols": _BASE_NUM_COLS + _FAMILY_NUM_COLS,
+    },
+    "fastball": {
+        "target": "y_next_pitch_fastball",
+        "cat_cols": _BASE_CAT_COLS,
+        "num_cols": _BASE_NUM_COLS,
+    },
+    "breaking": {
+        "target": "y_next_pitch_breaking",
+        "cat_cols": _BASE_CAT_COLS,
+        "num_cols": _BASE_NUM_COLS,
+    },
+    "offspeed": {
+        "target": "y_next_pitch_offspeed",
+        "cat_cols": _BASE_CAT_COLS,
+        "num_cols": _BASE_NUM_COLS,
+    },
 }
+
+FEATURE_SPEC = FEATURE_SPECS[MODEL_TYPE]
 
 EMB_DIMS = {
     "pitcher": 32,
@@ -35,20 +63,20 @@ EMB_DIMS = {
     "p_throws": 4,
     "inning_topbot": 4,
     "count_state": 8,
-    "prev_pitch_type": 16,
-    # "count_situation": 4,
+    "prev_pitch_type": 8,
     "base_state": 8,
+    "prev_pitch_group": 3
 }
 
 MODEL_HYPERPARAMETERS = {
-    'smoothing_weights': 0.35,
+    'smoothing_weights': 0.47,
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
-    'stopping_patience': 5,
-    'stopping_delta': 0.01,
+    'stopping_patience': 3,
+    'stopping_delta': 0.001,
     'batch_size': 64,
-    'dropout': 0.5,
+    'dropout': 0.3,
     'hidden_size': 128
 }
 
@@ -68,24 +96,24 @@ def main():
         print("No features found for historical_pitches table. Exiting.")
         return
 
-    data = get_training_data(features)
+    data = get_training_data(features, True)
     print("Collected Data")
 
     # Step 2: Cleaning the Data 
-    # Send the data to the preprocessor to get rid of features and pitches we do not care about 
+    #Send the data to the preprocessor to get rid of features and pitches we do not care about 
     data = clean_data(data)
-    print("Cleaned Data")
+    # print("Cleaned Data")
 
-    # # Step 3: Add Features from Feature Repo
+    # # # Step 3: Add Features from Feature Repo
     data = get_rnn_features(data)
     print("Completed Feature Engineering")
 
     data = data[~data['game_year'].isin([2021, 2022])]
 
-    # # Step 4: Send to RNN to be trained 
-    rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS)
+    # # # Step 4: Send to RNN to be trained 
+    rnn_training_handler(data, FEATURE_SPEC, EMB_DIMS, MODEL_HYPERPARAMETERS, MODEL_TYPE)
 
-    # Step 5: Send to be trained
+    # # Step 5: Send to be trained
     evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
 
 if __name__ == "__main__":

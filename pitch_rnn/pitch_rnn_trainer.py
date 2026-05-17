@@ -7,13 +7,14 @@ import torch.optim as optim
 import torch.nn.functional as F
 from pathlib import Path
 from model_shared.feature_engineering.pitch_constants import *
-from model_shared.feature_engineering.feature_calculator import pitch_to_family, add_batter_count_split_features, add_pitcher_count_split_features, calculate_game_state_features
+from model_shared.feature_engineering.feature_calculator import pitch_to_family, add_batter_count_split_features, add_pitcher_count_split_features, add_pitcher_family_rate_features, calculate_game_state_features
 from sklearn.preprocessing import StandardScaler
 from pitch_rnn.encoder import build_vocab, encode_df
 from pitch_rnn.sequence_builder import PitchSeqDS
 from torch.utils.data import DataLoader
 from model_shared.rnn_definition import PitchRNN
 from pitch_rnn.early_stopping import EarlyStopping
+from datetime import datetime
 from pitch_rnn.export_artifacts import *
 
 
@@ -23,9 +24,18 @@ def calculate_target_variable(data: pd.DataFrame) -> pd.DataFrame:
     data["y_next_pitch_type"] = data.groupby("pa_id")["pitch_type"].shift(-1)
     data["y_next_pitch_group"] = data["y_next_pitch_type"].map(lambda x: pitch_to_family(x))
 
+    data["y_next_pitch_fastball"] = data["y_next_pitch_type"].where(
+        data["y_next_pitch_type"].isin(FASTBALL)
+    )
+    data["y_next_pitch_breaking"] = data["y_next_pitch_type"].where(
+        data["y_next_pitch_type"].isin(BREAKING)
+    )
+    data["y_next_pitch_offspeed"] = data["y_next_pitch_type"].where(
+        data["y_next_pitch_type"].isin(OFFSPEED)
+    )
 
     data_train = data[data["target_is_real_pitch"] == True].copy()
-    data_train = data_train[data_train["y_next_pitch_group"].notna()].copy()  # filter on data_train, not data
+    data_train = data_train[data_train["y_next_pitch_group"].notna()].copy()
 
     return data_train
 
@@ -43,6 +53,11 @@ def apply_batter_lookup(train_df, test_df):
                    "batter_sit_swing_rate", "batter_sit_whiff_rate"]
     lookup = train_df[batter_cols].drop_duplicates(subset=["batter", "count_situation"])
     return test_df.merge(lookup, on=["batter", "count_situation"], how="left")
+
+def apply_pitcher_family_lookup(train_df, test_df):
+    family_cols = ["pitcher", "pitcher_family_fb_rate", "pitcher_family_br_rate", "pitcher_family_os_rate"]
+    lookup = train_df[family_cols].drop_duplicates(subset=["pitcher"])
+    return test_df.merge(lookup, on="pitcher", how="left")
 
 def split_by_pa_id(df: pd.DataFrame, pa_col="pa_id", ratios=(0.8, 0.2), seed: int=42):
     r_train, r_test = ratios
@@ -129,6 +144,7 @@ def calculate_class_weights(y_train, num_classes, pad_id=0, smoothing=0.35):
     weight_tensor = torch.zeros(num_classes)
     for class_id, weight in zip (unique, weights):
         weight_tensor[class_id] = weight
+    
     return weight_tensor
 
 def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
@@ -252,9 +268,10 @@ class FocalLoss(nn.Module):
         )
         pt = torch.exp(-ce_loss)  # probability of correct class
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
-        return focal_loss.mean()
+        non_pad_mask = (targets != self.ignore_index)
+        return focal_loss[non_pad_mask].mean()
 
-def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, model_params):
+def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, model_params, model_type: str = "group"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     TARGET_COL = feature_spec["target"]
@@ -269,15 +286,22 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     )
     print("Split Training Data (train)", train_df.shape)
     print("Split Training Data (test)", test_df.shape)
+
+    # fb_mask = train_df["y_next_pitch_group"] == "fastball"
+    # fb_df = train_df[fb_mask].sample(frac=0.75, random_state=42)  # tune frac
+    # non_fb_df = train_df[~fb_mask]
+    # train_df = pd.concat([fb_df, non_fb_df]).sample(frac=1, random_state=42)
     
     train_df = calculate_game_state_features(train_df)
     test_df  = calculate_game_state_features(test_df)
 
     train_df = add_pitcher_count_split_features(train_df)
     train_df = add_batter_count_split_features(train_df)
-    
+    train_df = add_pitcher_family_rate_features(train_df)
+
     test_df = apply_pitcher_lookup(train_df, test_df)
     test_df = apply_batter_lookup(train_df, test_df)
+    test_df = apply_pitcher_family_lookup(train_df, test_df)
 
     cat_vocabs = {c: build_vocab(train_df[c]) for c in CAT_COLS}
     y_vocab = build_vocab(train_df[TARGET_COL])
@@ -285,6 +309,9 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     num_classes = len(y_vocab) + 1
     scaler = StandardScaler()
     scaler.fit(train_df[NUM_COLS].fillna(0))
+
+    print(train_df.columns)
+    print(test_df.columns)
 
     train_enc = encode_df(train_df, feature_spec, cat_vocabs, y_vocab, scaler)
     test_enc = encode_df(test_df, feature_spec, cat_vocabs, y_vocab, scaler)
@@ -294,8 +321,8 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
     Xc_te, Xn_te, Y_te = make_fixed_sequences(test_enc,  feature_spec, max_len=MAX_LEN)
     print("Made Fixed Sequences")
 
-    sampler = build_balanced_sampler(Y_tr)
-    train_loader = DataLoader(PitchSeqDS(Xc_tr, Xn_tr, Y_tr), batch_size=model_params['batch_size'], shuffle=sampler)
+    # sampler = build_balanced_sampler(Y_tr)
+    train_loader = DataLoader(PitchSeqDS(Xc_tr, Xn_tr, Y_tr), batch_size=model_params['batch_size'], shuffle=True)
     test_loader  = DataLoader(PitchSeqDS(Xc_te, Xn_te, Y_te), batch_size=model_params['batch_size'], shuffle=False)
     print("Loaded Data")
 
@@ -317,29 +344,20 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
 
     model = model.to(device)
 
-    criterion = FocalLoss(gamma=1.5, weight=class_weights.to(device), ignore_index=PAD_ID)
-    optimizer = optim.Adam(model.parameters(), lr=model_params['optimizer_lr'], weight_decay=1e-4)
+    criterion = FocalLoss(gamma=2.0, weight=class_weights.to(device), ignore_index=PAD_ID)
+    # criterion = FocalLoss(gamma=1.5, weight=class_weights.to(device), ignore_index=PAD_ID)
+    optimizer = optim.Adam(model.parameters(), lr=model_params['optimizer_lr'], weight_decay=3e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', patience=2, factor=0.5,
     )
     early_stopping = EarlyStopping(patience=model_params['stopping_patience'], delta=model_params['stopping_delta'])
 
-    # Baseline: what accuracy do you get predicting the most common pitch every time?
-    most_common = train_df["y_next_pitch_type"].value_counts().index[0]
-    baseline_acc = (test_df["y_next_pitch_type"] == most_common).mean()
-    print(f"Naive baseline: {baseline_acc:.4f}")
-
-    # Also try: predict based on pitcher's own most common pitch
-    pitcher_most_common = train_df.groupby("pitcher")["y_next_pitch_type"].agg(lambda x: x.value_counts().index[0])
-    test_df["pitcher_baseline"] = test_df["pitcher"].map(pitcher_most_common)
-    pitcher_baseline_acc = (test_df["y_next_pitch_type"] == test_df["pitcher_baseline"]).mean()
-    print(f"Pitcher-frequency baseline: {pitcher_baseline_acc:.4f}")
-
     train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, early_stopping, device, num_classes)
 
-    export_model(model)
-    export_vocabs(cat_vocabs, y_vocab, feature_spec)
-    export_test_tensors(Xc_te, Xn_te, Y_te)
+    date_str = datetime.now().strftime('%Y%m%d')
+    export_model(model, filename=f"pitch_rnn_{model_type}_{date_str}.pt")
+    export_vocabs(cat_vocabs, y_vocab, feature_spec, filename=f"rnn_vocab_{model_type}_{date_str}.json")
+    export_test_tensors(Xc_te, Xn_te, Y_te, filename=f"test_tensors_{model_type}_{date_str}.pt")
     BASE = Path(__file__).parent.parent
     temp_path = BASE / "model_shared" / "vocab" / "temperature.json"
     with open(temp_path, "w") as f:

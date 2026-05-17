@@ -132,7 +132,7 @@ def build_transition_features_from_parquet(
 
         for metric in LOC_METRICS:
             remapped = f'{prefix}_loc_{metric}'
-            raw[remapped] = loc_dict.get(f'{metric}_zone{target_loc}')
+            raw[remapped] = loc_dict.get(f'{metric}_loc{target_loc}')
 
     _map_loc(batter_loc_raw, 'batter', location)
     _map_loc(pitcher_loc_raw, 'pitcher', location)

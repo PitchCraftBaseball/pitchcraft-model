@@ -99,6 +99,34 @@ def batter_situation_lookup(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def pitcher_family_lookup(df: pd.DataFrame) -> pd.DataFrame:
+    hist = df[["pitcher", "pitch_type"]].copy()
+    hist["is_fastball"] = hist["pitch_type"].isin(FASTBALL)
+    hist["is_breaking"] = hist["pitch_type"].isin(BREAKING)
+    hist["is_offspeed"] = hist["pitch_type"].isin(OFFSPEED)
+
+    return (
+        hist.groupby("pitcher")
+        .agg(
+            pitcher_family_fb_rate = ("is_fastball", "mean"),
+            pitcher_family_br_rate = ("is_breaking", "mean"),
+            pitcher_family_os_rate = ("is_offspeed", "mean"),
+        )
+        .reset_index()
+    )
+
+
+def add_pitcher_family_rate_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+
+    family_cols = ["pitcher_family_fb_rate", "pitcher_family_br_rate", "pitcher_family_os_rate"]
+    out = out.drop(columns=[c for c in family_cols if c in out.columns])
+
+    lookup = pitcher_family_lookup(df)
+    out = out.merge(lookup, on="pitcher", how="left")
+    return out
+
+
 def add_pitcher_count_split_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Adds
@@ -189,3 +217,36 @@ def situational_split(pitcher_id: int, df: pd.DataFrame) -> pd.DataFrame:
         )
     splits.insert(0, "pitcher", pitcher_id)
     return splits
+
+def calculate_woba(pa_df: pd.DataFrame) -> pd.DataFrame: 
+    ab_events = [
+    'single', 'double', 'triple', 'home_run',
+    'strikeout', 'strikeout_double_play',
+    'field_out', 'force_out',
+    'grounded_into_double_play', 'double_play', 'triple_play',
+    'field_error', 'fielders_choice', 'fielders_choice_out',
+    'catcher_interf'
+    ]
+
+    pa_df['AB']  = pa_df['events'].isin(ab_events).astype(int)
+    pa_df['SF']  = pa_df['events'].isin(['sac_fly', 'sac_fly_double_play']).astype(int)
+    pa_df['uBB'] = (pa_df['events'] == 'walk').astype(int)
+    pa_df['IBB'] = (pa_df['events'] == 'intent_walk').astype(int)
+    pa_df['HBP'] = (pa_df['events'] == 'hit_by_pitch').astype(int)
+    pa_df['1B']  = (pa_df['events'] == 'single').astype(int)
+    pa_df['2B']  = (pa_df['events'] == 'double').astype(int)
+    pa_df['3B']  = (pa_df['events'] == 'triple').astype(int)
+    pa_df['HR']  = (pa_df['events'] == 'home_run').astype(int)
+
+    grouped = pa_df.groupby('batter')[['uBB','HBP','1B','2B','3B','HR','AB','IBB','SF']].sum()
+
+    grouped['wOBA'] = (
+        0.691 * grouped['uBB'] +
+        0.722 * grouped['HBP'] +
+        0.882 * grouped['1B'] +
+        1.252 * grouped['2B'] +
+        1.584 * grouped['3B'] +
+        2.037 * grouped['HR']
+    ) / (grouped['AB'] + grouped['uBB'] + grouped['SF'] + grouped['HBP'])
+
+    return grouped

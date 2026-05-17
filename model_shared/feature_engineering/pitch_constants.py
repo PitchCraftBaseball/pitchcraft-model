@@ -11,3 +11,14 @@ IGNORE = {"ABS", "PO", "FA", 'EP'}
 PAD_ID = 0
 
 MAX_LEN = 8
+
+BASE_LABELS = {
+    'XXX': 0,
+    'OXX': 1,
+    'XOX': 2,
+    'OOX': 3,
+    'XXO': 4,
+    'OXO': 5,
+    'XOO': 6,
+    'OOO': 7,
+}

@@ -3,13 +3,14 @@
   "pad_id": 0,
   "emb_dims": {
     "pitcher": 32,
-    "batter": 32,
+    "batter":  32,
     "stand": 4,
     "p_throws": 4,
     "inning_topbot": 4,
     "count_state": 8,
-    "prev_pitch_type": 16,
-    "count_situation": 4
+    "prev_pitch_type": 8,
+    "base_state": 8,
+    "prev_pitch_group":3
   },
   "hidden": 128,
   "num_layers": 2,

@@ -1,4 +1,5 @@
 import pandas as pd
+from model_shared.feature_engineering.feature_calculator import pitch_to_family
 
 def sort_statcast(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(["game_date", "game_pk", "inning", "inning_topbot", "at_bat_number", "pitch_number"], ascending=[True, True, True, False, True, True]).reset_index(drop=True)
@@ -22,8 +23,11 @@ def universal_features(data: pd.DataFrame) -> pd.DataFrame:
     # Previous pitch type is the last real pitch but shifted 1. NaNs are now filled
     out["prev_pitch_type"] = (out.groupby("pa_id")["last_real_pitch_type"].shift(1).fillna("START"))
 
+    out["last_real_pitch_group"] = out["last_real_pitch_type"].map(pitch_to_family)
+    out["prev_pitch_group"] = (out.groupby("pa_id")["last_real_pitch_group"].shift(1).fillna("START"))
+
     # don't care about thse columns
-    out = out.drop(columns=["pitch_type_for_prev", "last_real_pitch_type"])
+    out = out.drop(columns=["pitch_type_for_prev", "last_real_pitch_type", "last_real_pitch_group"])
 
     out["seq_len"] = out.groupby("pa_id")["pitch_type"].transform("size")
 

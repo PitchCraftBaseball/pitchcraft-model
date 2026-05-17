@@ -33,3 +33,5 @@ plate_z
 release_speed
 pfx_x
 pfx_z
+events
+launch_speed_angle
