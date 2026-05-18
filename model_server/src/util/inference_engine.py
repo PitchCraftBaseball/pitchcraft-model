@@ -131,6 +131,7 @@ class InferenceEngine:
 
         sequence: List[PitchStep] = []
         outcome: Optional[str] = None
+        pa_states: List = []
 
         optimal_out = get_optimal_out(pitcher, batter, state_features)
         optimal_out_type = max(optimal_out, key=optimal_out.get)  # "strikeout", "groundout", or "flyout"
@@ -144,7 +145,7 @@ class InferenceEngine:
         )
 
         for pitch_idx in range(1, max_pitches + 1):
-            rnn_pitch_probs = self._predict_next_pitch(
+            rnn_pitch_probs, current_state = self._predict_next_pitch(
                 pitcher=pitcher,
                 batter=batter,
                 state_features=state_features,
@@ -154,7 +155,9 @@ class InferenceEngine:
                 prev_pitch_group=prev_pitch_group,
                 batter_side=batter_side,
                 pitcher_arm=pitcher_arm,
+                prior_states=pa_states,
             )
+            pa_states.append(current_state)
 
             logger.debug(
                 "\n--- PITCH %d  [%dB-%dS] ---\n"
@@ -335,7 +338,8 @@ class InferenceEngine:
         prev_pitch_group: str,
         batter_side: str,
         pitcher_arm: str,
-    ) -> Dict[str, float]:
+        prior_states: Optional[List] = None,
+    ) -> Tuple[Dict[str, float], Any]:
         situation = count_situation(balls, strikes)
         pitcher_splits = self.feature_store.get_pitcher_situation_splits(pitcher, situation)
         batter_splits = self.feature_store.get_batter_situation_splits(batter, situation)
@@ -361,13 +365,17 @@ class InferenceEngine:
             required_cols=list(all_required),
         )
 
-        x_cat, x_num, seq_len = build_tensors([state], self.group_artifacts)
+        seq_states = (prior_states or []) + [state]
+        seq_states = seq_states[-4:]
+
+        x_cat, x_num, seq_len = build_tensors(seq_states, self.group_artifacts)
 
         with torch.no_grad():
             group_logits = self.group_rnn(x_cat, x_num)
             group_probs = torch.softmax(group_logits, dim=-1)[0]
+        last_group_probs = group_probs[seq_len - 1 : seq_len]
         group_dist = build_pitch_probabilities(
-            group_probs, self.group_artifacts, seq_len, pitch_keys=["pitch_one"]
+            last_group_probs, self.group_artifacts, 1, pitch_keys=["pitch_one"]
         )["pitch_one"]
 
         logger.debug(
@@ -402,12 +410,13 @@ class InferenceEngine:
                 final_dist[next(iter(arsenal_in_group))] = group_prob
             else:
                 sub_artifacts, sub_rnn = self.sub_bundles[group_name]
-                sub_x_cat, sub_x_num, _ = build_tensors([state], sub_artifacts)
+                sub_x_cat, sub_x_num, sub_seq_len = build_tensors(seq_states, sub_artifacts)
                 with torch.no_grad():
                     sub_logits = sub_rnn(sub_x_cat, sub_x_num)
                     sub_probs = torch.softmax(sub_logits, dim=-1)[0]
+                last_sub_probs = sub_probs[sub_seq_len - 1 : sub_seq_len]
                 sub_dist = build_pitch_probabilities(
-                    sub_probs, sub_artifacts, seq_len, pitch_keys=["pitch_one"]
+                    last_sub_probs, sub_artifacts, 1, pitch_keys=["pitch_one"]
                 )["pitch_one"]
 
                 logger.debug(
@@ -424,7 +433,7 @@ class InferenceEngine:
                 for pitch_type, sub_prob in sub_dist.items():
                     final_dist[pitch_type] = group_prob * sub_prob
 
-        return final_dist
+        return final_dist, state
     
     def _get_arsenal(self, pitcher: str) -> Optional[set]:
         pitcher_data = self._arsenals.get(pitcher)
@@ -473,7 +482,8 @@ class InferenceEngine:
         # if p == 1, it is the weighted arithmetic mean
         # if p approaches infinity, it approaches the maximum score among the three
         # if p approaches negative infinity, it approaches the minimum score among the three
-        weighted_sum = (rnn_weight * (rnn_score ** p)) + (out_type_weight * (out_type_score ** p)) + (run_expectancy_weight * (adj_re_score ** p))
+        weighted_sum = (rnn_weight * (rnn_score ** p)) + (out_type_weight * (out_type_score ** p)) 
+        + (run_expectancy_weight * (adj_re_score ** p))
         return weighted_sum ** (1/p)
     
     @staticmethod

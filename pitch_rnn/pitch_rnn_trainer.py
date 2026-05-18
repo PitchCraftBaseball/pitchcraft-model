@@ -344,7 +344,7 @@ def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, mode
 
     model = model.to(device)
 
-    criterion = FocalLoss(gamma=2.0, weight=class_weights.to(device), ignore_index=PAD_ID)
+    criterion = FocalLoss(gamma=1.0, weight=class_weights.to(device), ignore_index=PAD_ID)
     # criterion = FocalLoss(gamma=1.5, weight=class_weights.to(device), ignore_index=PAD_ID)
     optimizer = optim.Adam(model.parameters(), lr=model_params['optimizer_lr'], weight_decay=3e-4)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(

@@ -205,20 +205,26 @@ def generate_confusion_matrix(
     cm      = confusion_matrix(y_true, y_pred, labels=labels)
     cm_norm = cm / cm.sum(axis=1, keepdims=True)
 
+    n = len(labels)
+    cell_inches = 0.55
+    if figsize == (12, 10):
+        figsize = (n * cell_inches + 3.5, n * cell_inches + 2.5)
+
     fig, ax = plt.subplots(figsize=figsize)
     sns.heatmap(
         cm_norm,
         xticklabels=tick_labels,
         yticklabels=tick_labels,
-        cmap="Blues",
+        cmap="Purples",
         annot=True,
         fmt=".2f",
         ax=ax,
-        annot_kws={"size": 36},
+        annot_kws={"size": 16},
     )
-    ax.set_xlabel("Predicted Pitch Type")
-    ax.set_ylabel("True Pitch Type")
-    ax.set_title("Pitch Type Confusion Matrix (Token-Level)")
+    ax.tick_params(labelsize=14)
+    ax.set_xlabel("Predicted Pitch Type", fontsize=14)
+    ax.set_ylabel("True Pitch Type", fontsize=14)
+    ax.set_title("Pitch Type Confusion Matrix", fontsize=18)
     plt.tight_layout()
 
     if save_dir is not None:
@@ -235,7 +241,7 @@ def generate_confusion_matrix(
 def generate_calibration_curves(
     model, test_loader, device, id_to_pitch,
     arsenal_masks=None, pad_id=PAD_ID,
-    n_bins=5, figsize=(20, 8), save_dir: str = None
+    n_bins=5, figsize=(8, 7), save_dir: str = None
 ):
     model.eval()
     all_logits, all_targets = [], []
@@ -263,23 +269,21 @@ def generate_calibration_curves(
     probs       = F.softmax(all_logits[mask], dim=-1).numpy()
     targets_np  = all_targets[mask].numpy()
 
-    pitch_ids = sorted(id_to_pitch.keys())
-    n_pitches = len(pitch_ids)
-    cols      = 5
-    rows      = (n_pitches + cols - 1) // cols
+    GROUP_COLORS = {
+        "fastball": ("tab:red",   "Fastball"),
+        "breaking": ("tab:blue",  "Breaking"),
+        "offspeed": ("tab:green", "Offspeed"),
+    }
 
-    fig, axes = plt.subplots(rows, cols, figsize=figsize)
-    axes      = axes.flatten()
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot([0, 1], [0, 1], "k--", linewidth=1.5, label="Perfect", zorder=0)
 
-    for i, class_id in enumerate(pitch_ids):
-        ax         = axes[i]
-        pitch_name = id_to_pitch[class_id]
-
+    for class_id in sorted(id_to_pitch.keys()):
+        pitch_name     = id_to_pitch[class_id]
         binary_targets = (targets_np == class_id).astype(int)
         class_probs    = probs[:, class_id]
 
         if binary_targets.sum() == 0:
-            ax.set_visible(False)
             continue
 
         fraction_pos, mean_pred = calibration_curve(
@@ -287,19 +291,18 @@ def generate_calibration_curves(
             n_bins=n_bins, strategy="uniform"
         )
 
-        ax.plot(mean_pred, fraction_pos, marker="o", color="steelblue", label=pitch_name)
-        ax.plot([0, 1], [0, 1], "k--", label="Perfect")
-        ax.set_title(pitch_name)
-        ax.set_xlabel("Mean Predicted Prob")
-        ax.set_ylabel("Fraction Positive")
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
+        color, legend_label = GROUP_COLORS.get(pitch_name.lower(), ("tab:gray", pitch_name))
+        ax.plot(mean_pred, fraction_pos, marker="o", color=color, label=legend_label, alpha=0.85)
 
-    # Hide any unused subplots
-    for j in range(i + 1, len(axes)):
-        axes[j].set_visible(False)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Mean Predicted Probability", fontsize=16)
+    ax.set_ylabel("Fraction Positive", fontsize=16)
+    ax.set_title("Calibration Curves by Pitch Type", fontsize=16)
+    ax.tick_params(labelsize=16)
+    ax.legend(fontsize=16)
+    ax.grid(True, alpha=0.3)
 
-    plt.suptitle("Calibration Curves by Pitch Type", fontsize=14)
     plt.tight_layout()
 
     if save_dir is not None:

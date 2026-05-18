@@ -69,14 +69,14 @@ EMB_DIMS = {
 }
 
 MODEL_HYPERPARAMETERS = {
-    'smoothing_weights': 0.47,
+    'smoothing_weights': 0.33,
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
     'stopping_patience': 3,
     'stopping_delta': 0.001,
     'batch_size': 64,
-    'dropout': 0.3,
+    'dropout': 0.35,
     'hidden_size': 128
 }
 
@@ -96,7 +96,7 @@ def main():
         print("No features found for historical_pitches table. Exiting.")
         return
 
-    data = get_training_data(features, True)
+    data = get_training_data(features)
     print("Collected Data")
 
     # Step 2: Cleaning the Data 
@@ -117,5 +117,5 @@ def main():
     evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
 
 if __name__ == "__main__":
-    main()
-    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
+    #main()
+    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
