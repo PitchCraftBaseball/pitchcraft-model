@@ -296,10 +296,10 @@ def generate_calibration_curves(
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.set_xlabel("Mean Predicted Probability", fontsize=16)
-    ax.set_ylabel("Fraction Positive", fontsize=16)
-    ax.set_title("Calibration Curves by Pitch Type", fontsize=16)
-    ax.tick_params(labelsize=16)
+    ax.set_xlabel("Mean Predicted Probability", fontsize=18)
+    ax.set_ylabel("Fraction Positive", fontsize=18)
+    ax.set_title("Calibration Curves by Pitch Type", fontsize=18)
+    ax.tick_params(labelsize=18)
     ax.legend(fontsize=16)
     ax.grid(True, alpha=0.3)
 
