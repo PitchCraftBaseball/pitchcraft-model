@@ -11,8 +11,6 @@ COPY model_server ./model_server
 
 COPY model_shared ./model_shared
 
-COPY pitch_rnn ./pitch_rnn
-
 COPY rnn_support_models ./rnn_support_models
 
 COPY pitch_arsenal ./pitch_arsenal
