@@ -24,6 +24,7 @@ from .util.inference_engine import (
     PlayerNotFoundError,
     SimulationResult,
     Strategy,
+    VALID_OUT_TYPES,
 )
 from .util.pitch_state_builder import MissingFeaturesError
 
@@ -78,6 +79,7 @@ class PredictRequest(BaseModel):
     state_features: Dict[str, Any] = Field(default_factory=dict)
     strategy: Strategy = "argmax"
     max_pitches: int = Field(default=12, ge=1, le=30)
+    preferred_out_type: Optional[str] = None
 
 
 class PredictedPitch(BaseModel):
@@ -189,14 +191,30 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
+        pref = (req.preferred_out_type or "").strip() or None
+        if pref is not None:
+            if pref not in VALID_OUT_TYPES:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "message": "preferred_out_type must be one of the allowed values.",
+                        "allowed": list(VALID_OUT_TYPES),
+                        "got": req.preferred_out_type,
+                    },
+                )
+            strategy: Strategy = "preferred"
+        else:
+            strategy = req.strategy
+
         try:
             result: SimulationResult = engine.simulate_plate_appearance(
                 pitcher=req.pitcher,
                 batter=req.batter,
                 year=req.year,
                 state_features=req.state_features,
-                strategy=req.strategy,
+                strategy=strategy,
                 max_pitches=req.max_pitches,
+                preferred_out_type=pref,
             )
         except PlayerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
