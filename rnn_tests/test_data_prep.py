@@ -14,7 +14,7 @@ from model_shared.feature_engineering.data_preprocessor import (
 )
 from pitch_rnn.pitch_rnn_trainer import calculate_target_variable, split_by_pa_id
 
-from tests.conftest import make_target_df, make_universal_df
+from rnn_tests.conftest import make_target_df, make_universal_df
 
 
 # ===========================================================================

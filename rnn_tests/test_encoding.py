@@ -11,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from pitch_rnn.encoder import build_vocab, encode, encode_df
 from model_shared.feature_engineering.pitch_constants import PAD_ID
 
-from tests.conftest import MINI_FEATURE_SPEC
+from rnn_tests.conftest import MINI_FEATURE_SPEC
 
 
 # ===========================================================================
