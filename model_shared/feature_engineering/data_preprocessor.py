@@ -1,4 +1,5 @@
 import pandas as pd
+from model_shared.feature_engineering.feature_calculator import pitch_to_family
 
 def sort_statcast(df: pd.DataFrame) -> pd.DataFrame:
     return df.sort_values(["game_date", "game_pk", "inning", "inning_topbot", "at_bat_number", "pitch_number"], ascending=[True, True, True, False, True, True]).reset_index(drop=True)
@@ -22,8 +23,11 @@ def universal_features(data: pd.DataFrame) -> pd.DataFrame:
     # Previous pitch type is the last real pitch but shifted 1. NaNs are now filled
     out["prev_pitch_type"] = (out.groupby("pa_id")["last_real_pitch_type"].shift(1).fillna("START"))
 
+    out["last_real_pitch_group"] = out["last_real_pitch_type"].map(pitch_to_family)
+    out["prev_pitch_group"] = (out.groupby("pa_id")["last_real_pitch_group"].shift(1).fillna("START"))
+
     # don't care about thse columns
-    out = out.drop(columns=["pitch_type_for_prev", "last_real_pitch_type"])
+    out = out.drop(columns=["pitch_type_for_prev", "last_real_pitch_type", "last_real_pitch_group"])
 
     out["seq_len"] = out.groupby("pa_id")["pitch_type"].transform("size")
 
@@ -34,6 +38,7 @@ def data_remapping(data: pd.DataFrame) -> pd.DataFrame:
     pitch_remapping = {
         'SC': 'CU',   # screwball -> curveball family
         'CS': 'CU',   # slow curve -> curveball
+        'FO': 'FS'
     }
 
     out['pitch_type'] = out['pitch_type'].replace(pitch_remapping)
@@ -60,7 +65,7 @@ def drop_unused_cols(data: pd.DataFrame) -> pd.DataFrame:
         "intercept_ball_minus_batter_pos_x_inches", "intercept_ball_minus_batter_pos_y_inches", "Unnamed: 0", 
         "delta_run_exp", "delta_pitcher_run_exp", "batter_days_until_next_game", "api_break_z_with_gravity", "api_break_x_arm", "api_break_x_batter_in", "batter_days_until_next_game",
         "pitcher_days_until_next_game", "batter_days_since_prev_game", "pitcher_days_since_prev_game", "n_priorpa_thisgame_player_at_bat", "n_thruorder_pitcher", 
-        "vx0", "vy0", "vz0", "ax", "ay", "az", "pfx_x", "pfx_z", "release_spin_rate", "spin_axis", "arm_angle", 'release_speed', 'release_pos_x', 'release_pos_z', 'release_extension', 'release_pos_y',
+        "vx0", "vy0", "vz0", "ax", "ay", "az", "release_spin_rate", "spin_axis", "arm_angle", 'release_pos_x', 'release_pos_z', 'release_extension', 'release_pos_y',
         'post_away_score','post_home_score', 'post_bat_score', 'post_fld_score',
     ]
     

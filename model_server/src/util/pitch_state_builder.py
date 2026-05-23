@@ -21,9 +21,15 @@ def _infer_field_type(value: Any) -> Any:
 def _derive_count_features(state_features: Dict[str, Any]) -> Dict[str, Any]:
     balls = int(state_features["balls"])
     strikes = int(state_features["strikes"])
+    base_state = (
+        int(bool(state_features.get("on_1b", 0))) * 1
+        + int(bool(state_features.get("on_2b", 0))) * 2
+        + int(bool(state_features.get("on_3b", 0))) * 4
+    )
     return {
         "count_state": f"{balls}-{strikes}",
         "count_situation": count_situation(balls, strikes),
+        "base_state": base_state,
     }
 
 

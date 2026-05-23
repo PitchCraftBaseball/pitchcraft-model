@@ -30,3 +30,8 @@ home_score_diff
 bat_score_diff
 plate_x
 plate_z
+release_speed
+pfx_x
+pfx_z
+events
+launch_speed_angle

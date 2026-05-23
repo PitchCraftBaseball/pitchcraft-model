@@ -9,6 +9,7 @@ import pandas as pd
 from model_shared.db import get_read_cursor
 from model_shared.feature_engineering.feature_calculator import (
     batter_situation_lookup,
+    pitcher_family_lookup,
     pitcher_situation_lookup,
 )
 
@@ -22,6 +23,11 @@ _PITCHER_SIT_COLS = [
 _BATTER_SIT_COLS = [
     "batter_sit_swing_rate",
     "batter_sit_whiff_rate",
+]
+_PITCHER_FAMILY_COLS = [
+    "pitcher_family_fb_rate",
+    "pitcher_family_br_rate",
+    "pitcher_family_os_rate",
 ]
 
 _HISTORY_COLS = ["balls", "strikes", "pitch_type", "description"]
@@ -38,6 +44,10 @@ class FeatureStore(Protocol):
 
     def get_batter_situation_splits(
         self, batter_id: str, count_situation: str
+    ) -> Dict[str, float]: ...
+
+    def get_pitcher_family_splits(
+        self, pitcher_id: str
     ) -> Dict[str, float]: ...
 
 
@@ -85,6 +95,16 @@ class _BaseHistoricalPitchesFeatureStore:
             return {col: 0.0 for col in _BATTER_SIT_COLS}
         row = match.iloc[0]
         return {col: float(row[col]) for col in _BATTER_SIT_COLS}
+
+    def get_pitcher_family_splits(self, pitcher_id: str) -> Dict[str, float]:
+        df = self._load_player_history("pitcher", pitcher_id)
+        if df.empty:
+            return {col: 0.0 for col in _PITCHER_FAMILY_COLS}
+        lookup = pitcher_family_lookup(df)
+        if lookup.empty:
+            return {col: 0.0 for col in _PITCHER_FAMILY_COLS}
+        row = lookup.iloc[0]
+        return {col: float(row[col]) for col in _PITCHER_FAMILY_COLS}
 
     def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
         raise NotImplementedError

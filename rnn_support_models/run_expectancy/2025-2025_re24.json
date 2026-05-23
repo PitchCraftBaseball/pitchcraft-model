@@ -1,0 +1,450 @@
+{
+  "XXX": {
+    "0": {
+      "strikeout": {
+        "occurrences": 10048,
+        "run_expectancy": 0.2491
+      },
+      "groundball": {
+        "occurrences": 13075,
+        "run_expectancy": 0.44031
+      },
+      "line_drive": {
+        "occurrences": 7597,
+        "run_expectancy": 0.70041
+      },
+      "flyball": {
+        "occurrences": 10882,
+        "run_expectancy": 0.50588
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 7796,
+        "run_expectancy": 0.09325
+      },
+      "groundball": {
+        "occurrences": 9529,
+        "run_expectancy": 0.21251
+      },
+      "line_drive": {
+        "occurrences": 5462,
+        "run_expectancy": 0.41926
+      },
+      "flyball": {
+        "occurrences": 7608,
+        "run_expectancy": 0.2897
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 6459,
+        "run_expectancy": 0.00093
+      },
+      "groundball": {
+        "occurrences": 7531,
+        "run_expectancy": 0.06188
+      },
+      "line_drive": {
+        "occurrences": 4285,
+        "run_expectancy": 0.18063
+      },
+      "flyball": {
+        "occurrences": 5979,
+        "run_expectancy": 0.15889
+      }
+    }
+  },
+  "OXX": {
+    "0": {
+      "strikeout": {
+        "occurrences": 2032,
+        "run_expectancy": 0.47146
+      },
+      "groundball": {
+        "occurrences": 3104,
+        "run_expectancy": 0.76514
+      },
+      "line_drive": {
+        "occurrences": 1566,
+        "run_expectancy": 1.27139
+      },
+      "flyball": {
+        "occurrences": 2282,
+        "run_expectancy": 0.86152
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 2494,
+        "run_expectancy": 0.19246
+      },
+      "groundball": {
+        "occurrences": 3534,
+        "run_expectancy": 0.41143
+      },
+      "line_drive": {
+        "occurrences": 2070,
+        "run_expectancy": 0.78599
+      },
+      "flyball": {
+        "occurrences": 2891,
+        "run_expectancy": 0.56174
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 2618,
+        "run_expectancy": 0.00038
+      },
+      "groundball": {
+        "occurrences": 3432,
+        "run_expectancy": 0.13112
+      },
+      "line_drive": {
+        "occurrences": 2014,
+        "run_expectancy": 0.428
+      },
+      "flyball": {
+        "occurrences": 2863,
+        "run_expectancy": 0.31436
+      }
+    }
+  },
+  "XOX": {
+    "0": {
+      "strikeout": {
+        "occurrences": 687,
+        "run_expectancy": 0.61135
+      },
+      "groundball": {
+        "occurrences": 1204,
+        "run_expectancy": 1.0515
+      },
+      "line_drive": {
+        "occurrences": 613,
+        "run_expectancy": 1.51223
+      },
+      "flyball": {
+        "occurrences": 760,
+        "run_expectancy": 1.1
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 1114,
+        "run_expectancy": 0.3079
+      },
+      "groundball": {
+        "occurrences": 1465,
+        "run_expectancy": 0.60341
+      },
+      "line_drive": {
+        "occurrences": 790,
+        "run_expectancy": 0.9962
+      },
+      "flyball": {
+        "occurrences": 1128,
+        "run_expectancy": 0.60372
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 1572,
+        "run_expectancy": 0.00191
+      },
+      "groundball": {
+        "occurrences": 1881,
+        "run_expectancy": 0.25678
+      },
+      "line_drive": {
+        "occurrences": 1049,
+        "run_expectancy": 0.74071
+      },
+      "flyball": {
+        "occurrences": 1445,
+        "run_expectancy": 0.34464
+      }
+    }
+  },
+  "OOX": {
+    "0": {
+      "strikeout": {
+        "occurrences": 516,
+        "run_expectancy": 0.98062
+      },
+      "groundball": {
+        "occurrences": 916,
+        "run_expectancy": 1.37991
+      },
+      "line_drive": {
+        "occurrences": 403,
+        "run_expectancy": 2.15385
+      },
+      "flyball": {
+        "occurrences": 589,
+        "run_expectancy": 1.6129
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 967,
+        "run_expectancy": 0.49741
+      },
+      "groundball": {
+        "occurrences": 1381,
+        "run_expectancy": 0.77046
+      },
+      "line_drive": {
+        "occurrences": 714,
+        "run_expectancy": 1.47199
+      },
+      "flyball": {
+        "occurrences": 1061,
+        "run_expectancy": 0.93874
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 1231,
+        "run_expectancy": 0.0
+      },
+      "groundball": {
+        "occurrences": 1544,
+        "run_expectancy": 0.33355
+      },
+      "line_drive": {
+        "occurrences": 874,
+        "run_expectancy": 1.00572
+      },
+      "flyball": {
+        "occurrences": 1239,
+        "run_expectancy": 0.54237
+      }
+    }
+  },
+  "XXO": {
+    "0": {
+      "strikeout": {
+        "occurrences": 72,
+        "run_expectancy": 0.77778
+      },
+      "groundball": {
+        "occurrences": 131,
+        "run_expectancy": 1.29771
+      },
+      "line_drive": {
+        "occurrences": 74,
+        "run_expectancy": 1.59459
+      },
+      "flyball": {
+        "occurrences": 84,
+        "run_expectancy": 1.28571
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 317,
+        "run_expectancy": 0.33123
+      },
+      "groundball": {
+        "occurrences": 510,
+        "run_expectancy": 0.88235
+      },
+      "line_drive": {
+        "occurrences": 262,
+        "run_expectancy": 1.26336
+      },
+      "flyball": {
+        "occurrences": 347,
+        "run_expectancy": 0.98847
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 582,
+        "run_expectancy": 0.00859
+      },
+      "groundball": {
+        "occurrences": 720,
+        "run_expectancy": 0.30694
+      },
+      "line_drive": {
+        "occurrences": 416,
+        "run_expectancy": 0.73798
+      },
+      "flyball": {
+        "occurrences": 557,
+        "run_expectancy": 0.30162
+      }
+    }
+  },
+  "OXO": {
+    "0": {
+      "strikeout": {
+        "occurrences": 169,
+        "run_expectancy": 1.10059
+      },
+      "groundball": {
+        "occurrences": 256,
+        "run_expectancy": 1.85156
+      },
+      "line_drive": {
+        "occurrences": 164,
+        "run_expectancy": 2.30488
+      },
+      "flyball": {
+        "occurrences": 209,
+        "run_expectancy": 1.86603
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 366,
+        "run_expectancy": 0.5
+      },
+      "groundball": {
+        "occurrences": 610,
+        "run_expectancy": 1.05082
+      },
+      "line_drive": {
+        "occurrences": 312,
+        "run_expectancy": 1.78846
+      },
+      "flyball": {
+        "occurrences": 436,
+        "run_expectancy": 1.32798
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 528,
+        "run_expectancy": 0.0
+      },
+      "groundball": {
+        "occurrences": 725,
+        "run_expectancy": 0.38345
+      },
+      "line_drive": {
+        "occurrences": 412,
+        "run_expectancy": 1.04612
+      },
+      "flyball": {
+        "occurrences": 584,
+        "run_expectancy": 0.46404
+      }
+    }
+  },
+  "XOO": {
+    "0": {
+      "strikeout": {
+        "occurrences": 137,
+        "run_expectancy": 1.37956
+      },
+      "groundball": {
+        "occurrences": 226,
+        "run_expectancy": 1.98673
+      },
+      "line_drive": {
+        "occurrences": 98,
+        "run_expectancy": 2.66327
+      },
+      "flyball": {
+        "occurrences": 151,
+        "run_expectancy": 1.97351
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 346,
+        "run_expectancy": 0.65029
+      },
+      "groundball": {
+        "occurrences": 451,
+        "run_expectancy": 1.54989
+      },
+      "line_drive": {
+        "occurrences": 260,
+        "run_expectancy": 1.94231
+      },
+      "flyball": {
+        "occurrences": 351,
+        "run_expectancy": 1.4416
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 468,
+        "run_expectancy": 0.0
+      },
+      "groundball": {
+        "occurrences": 477,
+        "run_expectancy": 0.48847
+      },
+      "line_drive": {
+        "occurrences": 284,
+        "run_expectancy": 1.39437
+      },
+      "flyball": {
+        "occurrences": 395,
+        "run_expectancy": 0.66076
+      }
+    }
+  },
+  "OOO": {
+    "0": {
+      "strikeout": {
+        "occurrences": 157,
+        "run_expectancy": 1.34395
+      },
+      "groundball": {
+        "occurrences": 234,
+        "run_expectancy": 2.41026
+      },
+      "line_drive": {
+        "occurrences": 136,
+        "run_expectancy": 3.11765
+      },
+      "flyball": {
+        "occurrences": 173,
+        "run_expectancy": 2.6185
+      }
+    },
+    "1": {
+      "strikeout": {
+        "occurrences": 357,
+        "run_expectancy": 0.71709
+      },
+      "groundball": {
+        "occurrences": 452,
+        "run_expectancy": 1.38717
+      },
+      "line_drive": {
+        "occurrences": 279,
+        "run_expectancy": 2.3405
+      },
+      "flyball": {
+        "occurrences": 398,
+        "run_expectancy": 1.73116
+      }
+    },
+    "2": {
+      "strikeout": {
+        "occurrences": 451,
+        "run_expectancy": 0.0
+      },
+      "groundball": {
+        "occurrences": 522,
+        "run_expectancy": 0.64176
+      },
+      "line_drive": {
+        "occurrences": 314,
+        "run_expectancy": 1.53822
+      },
+      "flyball": {
+        "occurrences": 481,
+        "run_expectancy": 0.66112
+      }
+    }
+  }
+}

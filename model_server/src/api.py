@@ -4,15 +4,15 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from model_shared.parameter_loaders import (
-    latest_parameters,
-    latest_vocab_json,
+    latest_parameters_for_specific_model,
+    latest_vocab_json_for_specific_model,
     load_vocabs_from_json,
 )
 from model_shared.rnn_definition import PitchRNN
@@ -45,15 +45,14 @@ REQUIRED_STATE_KEYS = [
 
 
 class Artifacts:
-    def __init__(self, path: Path) -> None:
-        data = json.loads(path.read_text())
+    def __init__(self, config_path: Path, vocab_path: Path) -> None:
+        data = json.loads(config_path.read_text())
         self.max_len = int(data.get("max_len", 8))
         self.pad_id = int(data.get("pad_id", 0))
         self.emb_dims: Dict[str, int] = dict(data["emb_dims"])
         self.hidden = int(data.get("hidden", 128))
         self.num_layers = int(data.get("num_layers", 1))
 
-        vocab_path = latest_vocab_json()
         self.cat_vocabs, self.y_vocab, feature_spec = load_vocabs_from_json(vocab_path)
         self.cat_cols = list(feature_spec["cat_cols"])
         self.num_cols = list(feature_spec["num_cols"])
@@ -94,6 +93,7 @@ class PredictedPitch(BaseModel):
     strikes_after: int
     terminal: bool
     outcome: Optional[str] = None
+    target_location: Optional[str] = None
 
 
 class PredictResponse(BaseModel):
@@ -116,7 +116,26 @@ def _step_to_payload(step: PitchStep) -> PredictedPitch:
         strikes_after=step.strikes_after,
         terminal=step.terminal,
         outcome=step.outcome,
+        target_location=step.target_location,
     )
+
+
+def _load_model_bundle(config_path: Path, model_type: str) -> Tuple[Artifacts, PitchRNN]:
+    vocab_path = latest_vocab_json_for_specific_model(model_type)
+    param_path = latest_parameters_for_specific_model(model_type)
+    arts = Artifacts(config_path, vocab_path)
+    model = PitchRNN(
+        cat_vocab_sizes=arts.cat_vocab_sizes(),
+        num_features=len(arts.num_cols),
+        emb_dims=arts.emb_dims,
+        hidden=arts.hidden,
+        num_classes=arts.num_classes(),
+        num_layers=arts.num_layers,
+        pad_id=arts.pad_id,
+    )
+    model.load_state_dict(torch.load(param_path, map_location="cpu"))
+    model.eval()
+    return arts, model
 
 
 def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
@@ -127,33 +146,26 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
 
     app = FastAPI(title="Pitch RNN Inference API")
 
-    artifacts_path = Path(__file__).resolve().parent / "model_config.json"
-    model_path = latest_parameters()
-
-    if not artifacts_path.exists():
+    config_path = Path(__file__).resolve().parent / "model_config.json"
+    if not config_path.exists():
         raise RuntimeError(
             "Missing model_config.json. Provide feature spec + vocabs before starting the API."
         )
-    if not model_path.exists():
-        raise RuntimeError(
-            "Missing pitch_rnn_*.pt. Train the model before starting the API."
-        )
 
-    artifacts = Artifacts(artifacts_path)
-    model = PitchRNN(
-        cat_vocab_sizes=artifacts.cat_vocab_sizes(),
-        num_features=len(artifacts.num_cols),
-        emb_dims=artifacts.emb_dims,
-        hidden=artifacts.hidden,
-        num_classes=artifacts.num_classes(),
-        num_layers=artifacts.num_layers,
-        pad_id=artifacts.pad_id,
-    )
-    model.load_state_dict(torch.load(model_path, map_location="cpu"))
-    model.eval()
+    group_artifacts, group_rnn = _load_model_bundle(config_path, "group")
+    sub_bundles: Dict[str, Tuple[Artifacts, PitchRNN]] = {
+        "fastball": _load_model_bundle(config_path, "fastball"),
+        "offspeed": _load_model_bundle(config_path, "offspeed"),
+        "breaking": _load_model_bundle(config_path, "breaking"),
+    }
 
     store: FeatureStore = feature_store or ParquetHistoricalPitchesFeatureStore()
-    engine = InferenceEngine(artifacts=artifacts, rnn=model, feature_store=store)
+    engine = InferenceEngine(
+        group_artifacts=group_artifacts,
+        group_rnn=group_rnn,
+        sub_bundles=sub_bundles,
+        feature_store=store,
+    )
 
     @app.get("/health")
     def health() -> Dict[str, str]:
