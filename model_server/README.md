@@ -43,10 +43,17 @@ Top-level fields:
   prior-season stats from the DB.
 - `strategy` (optional, default `"argmax"`) — `"argmax"` picks the most
   likely pitch / event each step; `"sample"` draws from the model
-  distributions for a stochastic rollout.
+  distributions for a stochastic rollout; `"optimal_out"` targets pitch
+  locations toward the matchup's computed best out type.
 - `max_pitches` (optional, default `12`, range `1`–`30`) — safety cap.
   If the loop hits the cap before terminating, the response's `outcome`
   is `"in_progress"`.
+- `preferred_out_type` (optional, default `null`) — one of
+  `"strikeout"`, `"groundout"`, `"flyout"`. When supplied (non-null,
+  non-empty), the server forces `strategy` to `"preferred"` regardless
+  of what was sent, skips the matchup's optimal-out computation, and
+  drives pitch selection + location targeting toward the requested out
+  type. Omit the field (or send `null` / `""`) to use `strategy` as-is.
 
 ### Mid-PA example (1 ball, 2 strikes)
 
@@ -102,6 +109,146 @@ curl -s -X POST http://localhost:8001/predict \
     }'
 ```
 **Note** we currently have `"year": 2025` specifically for pulling back historical data. 
+
+### With `preferred_out_type` override
+
+Force the simulation to pursue a groundout for this matchup. The server
+will internally set `strategy` to `"preferred"`:
+
+```bash
+curl -s -X POST http://localhost:8001/predict \
+  -H 'Content-Type: application/json' \
+  -d '{
+      "pitcher": "668933",
+      "batter":  "695657",
+      "year": 2025,
+      "strategy": "argmax",
+      "max_pitches": 12,
+      "preferred_out_type": "groundout",
+      "state_features": {
+        "balls": 0,
+        "strikes": 0,
+        "outs_when_up": 0,
+        "inning": 1,
+        "inning_topbot": "Top",
+        "bat_score_diff": 0,
+        "on_1b": false,
+        "on_2b": false,
+        "on_3b": false
+      }
+    }'
+```
+
+### Without `preferred_out_type` (default behavior)
+
+Omit the field — or send `null` / `""` — to keep the client-specified
+`strategy` and let the engine compute the optimal out internally:
+
+```bash
+curl -s -X POST http://localhost:8001/predict \
+  -H 'Content-Type: application/json' \
+  -d '{
+      "pitcher": "668933",
+      "batter":  "695657",
+      "year": 2025,
+      "strategy": "argmax",
+      "max_pitches": 12,
+      "preferred_out_type": null,
+      "state_features": {
+        "balls": 0,
+        "strikes": 0,
+        "outs_when_up": 0,
+        "inning": 1,
+        "inning_topbot": "Top",
+        "bat_score_diff": 0,
+        "on_1b": false,
+        "on_2b": false,
+        "on_3b": false
+      }
+    }'
+```
+
+### Batch endpoint: `POST /predict/batch`
+
+Score multiple plate appearances in one HTTP call. Each item is a normal
+`PredictRequest` (same shape as `/predict`, including optional
+`preferred_out_type`). Semantics:
+
+- Up to **50 items per request** (larger batches are rejected with 422).
+- **Fail-fast**: if any item has missing `state_features` keys, an invalid
+  `preferred_out_type`, or hits a `PlayerNotFoundError` /
+  `MissingFeaturesError` mid-batch, the entire request fails with the
+  offending item's `failed_index` in the error detail. No partial
+  results are returned.
+- Items run sequentially through the same single-worker inference queue
+  used by `/predict`, so a batch will not interleave with other
+  concurrent requests but will not parallelize internally either.
+
+Sample request — two PAs, the second one overriding to a groundout:
+
+```bash
+curl -s -X POST http://localhost:8001/predict/batch \
+  -H 'Content-Type: application/json' \
+  -d '{
+      "requests": [
+        {
+          "pitcher": "668933",
+          "batter":  "695657",
+          "year": 2025,
+          "strategy": "argmax",
+          "max_pitches": 12,
+          "state_features": {
+            "balls": 0, "strikes": 0, "outs_when_up": 0,
+            "inning": 1, "inning_topbot": "Top",
+            "bat_score_diff": 0,
+            "on_1b": false, "on_2b": false, "on_3b": false
+          }
+        },
+        {
+          "pitcher": "668933",
+          "batter":  "695657",
+          "year": 2025,
+          "max_pitches": 12,
+          "preferred_out_type": "groundout",
+          "state_features": {
+            "balls": 1, "strikes": 2, "outs_when_up": 1,
+            "inning": 3, "inning_topbot": "Top",
+            "bat_score_diff": -2,
+            "on_1b": false, "on_2b": false, "on_3b": true,
+            "prev_pitch_type": "FF"
+          }
+        }
+      ]
+    }'
+```
+
+Response shape:
+
+```json
+{
+  "results": [
+    { "outcome": "...", "pitch_count": 4, "sequence": [ ... ] },
+    { "outcome": "...", "pitch_count": 6, "sequence": [ ... ] }
+  ]
+}
+```
+
+`results` is the same length as the input `requests` and in the same
+order. Each entry has the exact shape documented in the
+[Response shape](#response-shape) section below.
+
+On error, the response body's `detail` includes `failed_index` pointing
+at the offending item — e.g. item 1 missing `balls`:
+
+```json
+{
+  "detail": {
+    "failed_index": 1,
+    "missing_features": ["balls"],
+    "message": "state_features is missing required keys."
+  }
+}
+```
 
 ### Response shape
 
