@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Dict
 import joblib
 import pandas as pd
-
+from . inference_utils import prepare_inference_data
 from . import feature_tables
 
-LOC_METRICS = [
+LOC_METRICS = (
     'strikeout_percentage', 'whiff_percentage', 'walk_percentage', 'swing_percentage', 'foul_percentage'
-]
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _MODELS_DIR = _REPO_ROOT / "rnn_support_models" / "transition_model" / "models"
@@ -32,23 +32,6 @@ swing_features = stage1_data['features']
 
 called_strike_model = stage2_data['model']
 called_strike_features = stage2_data['features']
-
-
-def prepare_inference_data(df: pd.DataFrame, features: list[str]) -> pd.DataFrame:
-    cat_cols = ['prev_pitch_type', 'pitch_type', 'stand', 'p_throws', 'inning_topbot']
-    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
-
-    df['two_strikes'] = (df['strikes'] == 2).astype(int)
-    df['full_count'] = ((df['balls'] == 3) & (df['strikes'] == 2)).astype(int)
-
-    if 'p_throws_R' in df.columns and 'stand_R' in df.columns:
-        df['is_platoon'] = (df['p_throws_R'] != df['stand_R']).astype(int)
-
-    for col in features:
-        if col not in df.columns:
-            df[col] = 0
-
-    return df[features]
 
 
 def build_pitch_result_probabilities(df: pd.DataFrame) -> Dict[str, float]:
@@ -127,9 +110,6 @@ def build_transition_features_from_parquet(
     _remap_stats(pitcher_prev_raw, 'pitcher')
 
     def _map_loc(loc_dict, prefix, target_loc):
-        if target_loc is None or loc_dict is None:
-            return
-
         for metric in LOC_METRICS:
             remapped = f'{prefix}_loc_{metric}'
             raw[remapped] = loc_dict.get(f'{metric}_loc{target_loc}')
@@ -152,6 +132,11 @@ def predict_pitch_transition_outcome(
     game_context: Dict[str, Any],
     location: int = None,
 ) -> Dict[str, float]:
+    if None in (batter_id, pitcher_id, pitch_type, year):
+        raise ValueError(
+            'batter_id, pitcher_id, pitch_type, and year are all required'
+        )
+    
     parquet_features = build_transition_features_from_parquet(
         batter_id,
         pitcher_id,

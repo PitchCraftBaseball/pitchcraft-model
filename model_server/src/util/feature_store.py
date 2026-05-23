@@ -58,13 +58,26 @@ class _BaseHistoricalPitchesFeatureStore:
     in lockstep.
     """
 
+    @lru_cache(maxsize=1024)
+    def _get_pitcher_lookup(self, pitcher_id: str) -> pd.DataFrame:
+        df = self._load_player_history("pitcher", pitcher_id)
+        if df.empty:
+            return pd.DataFrame()
+        return pitcher_situation_lookup(df)
+
+    @lru_cache(maxsize=1024)
+    def _get_batter_lookup(self, batter_id: str) -> pd.DataFrame:
+        df = self._load_player_history("batter", batter_id)
+        if df.empty:
+            return pd.DataFrame()
+        return batter_situation_lookup(df)
+
     def get_pitcher_situation_splits(
         self, pitcher_id: str, count_situation: str
     ) -> Dict[str, float]:
-        df = self._load_player_history("pitcher", pitcher_id)
-        if df.empty:
+        lookup = self._get_pitcher_lookup(pitcher_id)
+        if lookup.empty:
             return {col: 0.0 for col in _PITCHER_SIT_COLS}
-        lookup = pitcher_situation_lookup(df)
         match = lookup[lookup["count_situation"] == count_situation]
         if match.empty:
             return {col: 0.0 for col in _PITCHER_SIT_COLS}
@@ -74,10 +87,9 @@ class _BaseHistoricalPitchesFeatureStore:
     def get_batter_situation_splits(
         self, batter_id: str, count_situation: str
     ) -> Dict[str, float]:
-        df = self._load_player_history("batter", batter_id)
-        if df.empty:
+        lookup = self._get_batter_lookup(batter_id)
+        if lookup.empty:
             return {col: 0.0 for col in _BATTER_SIT_COLS}
-        lookup = batter_situation_lookup(df)
         match = lookup[lookup["count_situation"] == count_situation]
         if match.empty:
             return {col: 0.0 for col in _BATTER_SIT_COLS}
@@ -141,6 +153,7 @@ class ParquetHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
     no DB round-trip.
     """
 
+    @lru_cache(maxsize=1024)
     def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
         df = _load_historical_pitches()
         id_col = "_batter_id" if role == "batter" else "_pitcher_id"
