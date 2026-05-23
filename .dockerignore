@@ -21,3 +21,4 @@ start_server
 README.md
 spec.md
 *evaluations/ 
+*rnn_tests/ 
