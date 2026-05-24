@@ -34,7 +34,9 @@ COMPOSITE_CONFIG = {
     "run_expectancy_weight": 1
 }
 
-Strategy = Literal["argmax", "sample", "optimal_out"]
+Strategy = Literal["argmax", "sample", "optimal_out", "preferred"]
+
+VALID_OUT_TYPES = ("strikeout", "groundout", "flyout")
 
 PA_OUTCOMES = ("walk", "strikeout", "groundout", "flyout", "hard_hit_flyball", "in_progress")
 
@@ -113,6 +115,7 @@ class InferenceEngine:
         strategy: Strategy = "argmax",
         max_pitches: int = 12,
         rng: Optional[np.random.Generator] = None,
+        preferred_out_type: Optional[str] = None,
     ) -> SimulationResult:
         if strategy == "sample" and rng is None:
             rng = np.random.default_rng()
@@ -133,16 +136,29 @@ class InferenceEngine:
         outcome: Optional[str] = None
         pa_states: List = []
 
-        optimal_out = get_optimal_out(pitcher, batter, state_features)
-        optimal_out_type = max(optimal_out, key=optimal_out.get)  # "strikeout", "groundout", or "flyout"
+        if strategy == "preferred":
+            if preferred_out_type not in VALID_OUT_TYPES:
+                raise ValueError(
+                    f"preferred_out_type must be one of {VALID_OUT_TYPES}, got {preferred_out_type!r}"
+                )
+            optimal_out = {ot: (1.0 if ot == preferred_out_type else 0.0) for ot in VALID_OUT_TYPES}
+            optimal_out_type = preferred_out_type
+            logger.debug(
+                "\n--- PREFERRED_OUT ---\n"
+                "  pitcher=%s  batter=%s  preferred=%s\n",
+                pitcher, batter, preferred_out_type,
+            )
+        else:
+            optimal_out = get_optimal_out(pitcher, batter, state_features)
+            optimal_out_type = max(optimal_out, key=optimal_out.get)  # "strikeout", "groundout", or "flyout"
+            logger.debug(
+                "\n--- OPTIMAL_OUT ---\n"
+                "  pitcher=%s  batter=%s\n"
+                "  scores=%s\n"
+                "  target=%s\n",
+                pitcher, batter, optimal_out, optimal_out_type,
+            )
         loc_context = precompute_location_context(pitcher, batter)
-        logger.debug(
-            "\n--- OPTIMAL_OUT ---\n"
-            "  pitcher=%s  batter=%s\n"
-            "  scores=%s\n"
-            "  target=%s\n",
-            pitcher, batter, optimal_out, optimal_out_type,
-        )
 
         for pitch_idx in range(1, max_pitches + 1):
             rnn_pitch_probs, current_state = self._predict_next_pitch(
@@ -192,7 +208,7 @@ class InferenceEngine:
             for candidate_pitch, rnn_score in rnn_pitch_probs.items():
                 candidate_location = get_optimal_location_from_context(
                     loc_context, candidate_pitch, current_state,
-                    optimal_out_type if strategy == "optimal_out" else None,
+                    optimal_out_type if strategy in ("optimal_out", "preferred") else None,
                 )
                 candidate_zone = BUCKET_TO_ZONE[candidate_location]
 
@@ -492,7 +508,7 @@ class InferenceEngine:
         strategy: Strategy,
         rng: Optional[np.random.Generator],
     ) -> str:
-        if strategy in ("argmax", "optimal_out"):
+        if strategy in ("argmax", "optimal_out", "preferred"):
             return max(probs, key=probs.get)
         if strategy == "sample":
             keys = list(probs)

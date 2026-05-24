@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
@@ -24,6 +28,7 @@ from .util.inference_engine import (
     PlayerNotFoundError,
     SimulationResult,
     Strategy,
+    VALID_OUT_TYPES,
 )
 from .util.pitch_state_builder import MissingFeaturesError
 
@@ -78,6 +83,7 @@ class PredictRequest(BaseModel):
     state_features: Dict[str, Any] = Field(default_factory=dict)
     strategy: Strategy = "argmax"
     max_pitches: int = Field(default=12, ge=1, le=30)
+    preferred_out_type: Optional[str] = None
 
 
 class PredictedPitch(BaseModel):
@@ -100,6 +106,17 @@ class PredictResponse(BaseModel):
     outcome: Literal["walk", "strikeout", "groundout", "flyout", "hard_hit_flyball", "in_progress"]
     pitch_count: int
     sequence: List[PredictedPitch]
+
+
+BATCH_MAX_ITEMS = 50
+
+
+class BatchPredictRequest(BaseModel):
+    requests: List[PredictRequest] = Field(..., min_length=1, max_length=BATCH_MAX_ITEMS)
+
+
+class BatchPredictResponse(BaseModel):
+    results: List[PredictResponse]
 
 
 def _step_to_payload(step: PitchStep) -> PredictedPitch:
@@ -144,8 +161,6 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    app = FastAPI(title="Pitch RNN Inference API")
-
     config_path = Path(__file__).resolve().parent / "model_config.json"
     if not config_path.exists():
         raise RuntimeError(
@@ -167,19 +182,66 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         feature_store=store,
     )
 
+    inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pitch-inference")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            inference_executor.shutdown(wait=True)
+
+    app = FastAPI(title="Pitch RNN Inference API", lifespan=lifespan)
+
+    def _validate_state(state_features: Dict[str, Any]) -> List[str]:
+        return [k for k in REQUIRED_STATE_KEYS if k not in state_features]
+
+    def _resolve_strategy(req: PredictRequest, *, failed_index: Optional[int] = None) -> Tuple[Strategy, Optional[str]]:
+        pref = (req.preferred_out_type or "").strip() or None
+        if pref is not None:
+            if pref not in VALID_OUT_TYPES:
+                detail: Dict[str, Any] = {
+                    "message": "preferred_out_type must be one of the allowed values.",
+                    "allowed": list(VALID_OUT_TYPES),
+                    "got": req.preferred_out_type,
+                }
+                if failed_index is not None:
+                    detail["failed_index"] = failed_index
+                raise HTTPException(status_code=422, detail=detail)
+            return "preferred", pref
+        return req.strategy, None
+
+    def _run_simulation(req: PredictRequest, strategy: Strategy, pref: Optional[str]) -> SimulationResult:
+        return engine.simulate_plate_appearance(
+            pitcher=req.pitcher,
+            batter=req.batter,
+            year=req.year,
+            state_features=req.state_features,
+            strategy=strategy,
+            max_pitches=req.max_pitches,
+            preferred_out_type=pref,
+        )
+
+    def _result_to_response(result: SimulationResult) -> PredictResponse:
+        return PredictResponse(
+            outcome=result.outcome,
+            pitch_count=result.pitch_count,
+            sequence=[_step_to_payload(step) for step in result.sequence],
+        )
+
     @app.get("/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/predict", response_model=PredictResponse)
-    def predict(req: PredictRequest) -> PredictResponse:
+    async def predict(req: PredictRequest) -> PredictResponse:
         start = time.perf_counter()
         logger.info(
             "predict request: pitcher=%s batter=%s year=%s strategy=%s max_pitches=%s",
             req.pitcher, req.batter, req.year, req.strategy, req.max_pitches,
         )
 
-        missing = [k for k in REQUIRED_STATE_KEYS if k not in req.state_features]
+        missing = _validate_state(req.state_features)
         if missing:
             raise HTTPException(
                 status_code=422,
@@ -189,14 +251,12 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
+        strategy, pref = _resolve_strategy(req)
+
+        loop = asyncio.get_running_loop()
         try:
-            result: SimulationResult = engine.simulate_plate_appearance(
-                pitcher=req.pitcher,
-                batter=req.batter,
-                year=req.year,
-                state_features=req.state_features,
-                strategy=req.strategy,
-                max_pitches=req.max_pitches,
+            result: SimulationResult = await loop.run_in_executor(
+                inference_executor, partial(_run_simulation, req, strategy, pref)
             )
         except PlayerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -209,15 +269,77 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
-        response = PredictResponse(
-            outcome=result.outcome,
-            pitch_count=result.pitch_count,
-            sequence=[_step_to_payload(step) for step in result.sequence],
-        )
+        response = _result_to_response(result)
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
             "predict response: pitcher=%s batter=%s outcome=%s pitch_count=%d elapsed_ms=%.2f",
             req.pitcher, req.batter, result.outcome, result.pitch_count, elapsed_ms,
+        )
+        return response
+
+    def _run_batch(
+        items: List[Tuple[PredictRequest, Strategy, Optional[str]]],
+    ) -> List[SimulationResult]:
+        results: List[SimulationResult] = []
+        for i, (item, strategy, pref) in enumerate(items):
+            try:
+                results.append(_run_simulation(item, strategy, pref))
+            except (PlayerNotFoundError, MissingFeaturesError) as exc:
+                exc.failed_index = i  # type: ignore[attr-defined]
+                raise
+        return results
+
+    @app.post("/predict/batch", response_model=BatchPredictResponse)
+    async def predict_batch(req: BatchPredictRequest) -> BatchPredictResponse:
+        start = time.perf_counter()
+        logger.info("predict_batch request: size=%d", len(req.requests))
+
+        prepared: List[Tuple[PredictRequest, Strategy, Optional[str]]] = []
+        for i, item in enumerate(req.requests):
+            missing = _validate_state(item.state_features)
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "failed_index": i,
+                        "missing_features": missing,
+                        "message": "state_features is missing required keys.",
+                    },
+                )
+            strategy, pref = _resolve_strategy(item, failed_index=i)
+            prepared.append((item, strategy, pref))
+
+        loop = asyncio.get_running_loop()
+        try:
+            results: List[SimulationResult] = await loop.run_in_executor(
+                inference_executor, partial(_run_batch, prepared)
+            )
+        except PlayerNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "failed_index": getattr(exc, "failed_index", None),
+                    "message": str(exc),
+                },
+            )
+        except MissingFeaturesError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "failed_index": getattr(exc, "failed_index", None),
+                    "missing_features": exc.missing,
+                    "message": "Request is missing features required by the loaded model.",
+                },
+            )
+
+        response = BatchPredictResponse(results=[_result_to_response(r) for r in results])
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        outcomes: Dict[str, int] = {}
+        for r in results:
+            outcomes[r.outcome] = outcomes.get(r.outcome, 0) + 1
+        logger.info(
+            "predict_batch response: size=%d outcomes=%s elapsed_ms=%.2f",
+            len(results), outcomes, elapsed_ms,
         )
         return response
 

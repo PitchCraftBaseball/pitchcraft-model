@@ -11,7 +11,7 @@ import torch
 from pitch_rnn.pitch_rnn_trainer import make_fixed_sequences
 from model_shared.feature_engineering.pitch_constants import PAD_ID
 
-from tests.conftest import MINI_FEATURE_SPEC, make_encoded_df
+from rnn_tests.conftest import MINI_FEATURE_SPEC, make_encoded_df
 
 
 # ---------------------------------------------------------------------------
