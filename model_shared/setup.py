@@ -134,8 +134,11 @@ _SUPPORT_TABLE_QUERIES: dict[str, tuple[str, tuple]] = {
 def _bootstrap_support_tables() -> None:
     _DATA_DIR.mkdir(exist_ok=True)
     for name, (query, params) in _SUPPORT_TABLE_QUERIES.items():
-        df = query_table_dataframe(query, params)
         path = _DATA_DIR / f"{name}.parquet"
+        if path.exists():
+            print(f"Skipping {name}: cached parquet found at {path}")
+            continue
+        df = query_table_dataframe(query, params)
         df.to_parquet(path, index=False, compression="snappy")
         print(f"Saved {len(df):,} rows to {path}")
 
@@ -151,14 +154,18 @@ if __name__ == "__main__":
     if not features:
         raise ValueError("No features found for historical_pitches")
 
-    features = with_out_type_historical_pitch_columns(features)
-    df = query_historical_pitches_by_year("historical_pitches", features, start_year=2024, end_year=2025)
-    df = enrich_with_out_type_features(df)
+    historical_path = _DATA_DIR / "historical_pitches.parquet"
+    if historical_path.exists():
+        print(f"Skipping historical_pitches: cached parquet found at {historical_path}")
+    else:
+        features = with_out_type_historical_pitch_columns(features)
+        df = query_historical_pitches_by_year("historical_pitches", features, start_year=2024, end_year=2025)
+        df = enrich_with_out_type_features(df)
 
-    # Ensure stable parquet typing for date-like values returned as Python objects.
-    if "game_date" in df.columns:
-        df["game_date"] = df["game_date"].astype("string")
+        # Ensure stable parquet typing for date-like values returned as Python objects.
+        if "game_date" in df.columns:
+            df["game_date"] = df["game_date"].astype("string")
 
-    save_training_data(df)
+        save_training_data(df)
 
     _bootstrap_support_tables()
