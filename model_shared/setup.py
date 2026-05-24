@@ -1,6 +1,7 @@
 """
 Setup script. Might call this in an entrypoint script to set up a historical cache for the inference model. TBD. - Dylan
 """
+import argparse
 import logging
 from pathlib import Path
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path("data")
 
-_SUPPORT_TABLE_START_YEAR = 2024
+_SUPPORT_TABLE_START_YEAR = 2023
 _SUPPORT_TABLE_END_YEAR = 2025
 
 _ZONE_METRICS = (
@@ -131,11 +132,11 @@ _SUPPORT_TABLE_QUERIES: dict[str, tuple[str, tuple]] = {
 }
 
 
-def _bootstrap_support_tables() -> None:
+def _bootstrap_support_tables(force: bool = False) -> None:
     _DATA_DIR.mkdir(exist_ok=True)
     for name, (query, params) in _SUPPORT_TABLE_QUERIES.items():
         path = _DATA_DIR / f"{name}.parquet"
-        if path.exists():
+        if path.exists() and not force:
             print(f"Skipping {name}: cached parquet found at {path}")
             continue
         df = query_table_dataframe(query, params)
@@ -144,7 +145,15 @@ def _bootstrap_support_tables() -> None:
 
 
 if __name__ == "__main__":
-    logger.info("Running setup script")
+    parser = argparse.ArgumentParser(description="Bootstrap historical + support parquet caches.")
+    parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Re-pull all parquets even if cached files already exist on disk.",
+    )
+    args = parser.parse_args()
+
+    logger.info("Running setup script (force=%s)", args.force)
     feature_list_path = Path(__file__).resolve().parent.parent / "feature_list"
     feature_list_dict = validate_feature_list_file(str(feature_list_path))
     if not feature_list_dict:
@@ -155,11 +164,11 @@ if __name__ == "__main__":
         raise ValueError("No features found for historical_pitches")
 
     historical_path = _DATA_DIR / "historical_pitches.parquet"
-    if historical_path.exists():
+    if historical_path.exists() and not args.force:
         print(f"Skipping historical_pitches: cached parquet found at {historical_path}")
     else:
         features = with_out_type_historical_pitch_columns(features)
-        df = query_historical_pitches_by_year("historical_pitches", features, start_year=2024, end_year=2025)
+        df = query_historical_pitches_by_year("historical_pitches", features, start_year=2023, end_year=2025)
         df = enrich_with_out_type_features(df)
 
         # Ensure stable parquet typing for date-like values returned as Python objects.
@@ -168,4 +177,4 @@ if __name__ == "__main__":
 
         save_training_data(df)
 
-    _bootstrap_support_tables()
+    _bootstrap_support_tables(force=args.force)
