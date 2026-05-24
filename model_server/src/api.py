@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -19,6 +20,8 @@ from model_shared.parameter_loaders import (
     load_vocabs_from_json,
 )
 from model_shared.rnn_definition import PitchRNN
+from model_shared.optimal_out_handler import build_optimal_out_context
+from model_shared.location_helper import build_global_location_context
 
 from .dto import (
     BatchPredictRequest,
@@ -91,6 +94,11 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    # Pin torch intra/inter-op threads to 1 so concurrent inference workers
+    # don't fight over cores; concurrency comes from the executor below.
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+
     config_path = Path(__file__).resolve().parent / "model_config.json"
     if not config_path.exists():
         raise RuntimeError(
@@ -104,16 +112,30 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         "breaking": _load_model_bundle(config_path, "breaking"),
     }
 
+    # These two used to run on every /predict (reading the full historical
+    # pitches parquet + running league-wide aggregations each time). Build
+    # them once at startup and reuse across requests.
+    t0 = time.perf_counter()
+    optimal_out_ctx = build_optimal_out_context()
+    logger.info("optimal_out context built in %.2fs", time.perf_counter() - t0)
+    t0 = time.perf_counter()
+    location_ctx = build_global_location_context()
+    logger.info("location context built in %.2fs", time.perf_counter() - t0)
+
     store: FeatureStore = feature_store or ParquetHistoricalPitchesFeatureStore()
     engine = InferenceEngine(
         group_artifacts=group_artifacts,
         group_rnn=group_rnn,
         sub_bundles=sub_bundles,
         feature_store=store,
+        optimal_out_ctx=optimal_out_ctx,
+        location_ctx=location_ctx,
     )
     handler = RequestHandler(engine)
 
-    inference_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pitch-inference")
+    workers = int(os.getenv("MODEL_SERVER_WORKERS", "0")) or min(4, (os.cpu_count() or 1))
+    logger.info("inference executor: max_workers=%d", workers)
+    inference_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pitch-inference")
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
