@@ -277,3 +277,8 @@ at the offending item — e.g. item 1 missing `balls`:
 
 Only the final entry in `sequence` will have `terminal: true` and a
 non-null `outcome` (matching the top-level `outcome`).
+
+## Running locally using Docker 
+```
+docker compose up -f ./docker-compose.local.yml --build 
+```

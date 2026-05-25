@@ -1,12 +1,26 @@
 import pandas as pd
 import json
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from model_shared.feature_engineering.feature_calculator import *
 from model_shared.feature_engineering.pitch_constants import BASE_LABELS
 
 _BASE_STATE_DECODE = {v: k for k, v in BASE_LABELS.items()}
 from sklearn.preprocessing import MinMaxScaler
+
+
+@dataclass
+class OptimalOutContext:
+    """Per-process state needed to score optimal-out for any (pitcher, batter, state)
+    triple. Build once via build_optimal_out_context(); pass to
+    get_optimal_out_from_context() per request.
+    """
+    pitcher_scaled: pd.DataFrame
+    batter_scaled: pd.DataFrame
+    re24: dict
+    RE24_MAX: float
 
 
 def sort_statcast(df: pd.DataFrame) -> pd.DataFrame:
@@ -173,12 +187,14 @@ def calculate_optimal_out(pitcher, batter, outs, base_state, pitcher_scaled, bat
     return scores
 
 
-def get_optimal_out(pitcher, batter, state_features):
-    outs = state_features['outs_when_up']
+def build_optimal_out_context() -> OptimalOutContext:
+    """Build the per-process context used by get_optimal_out_from_context.
 
-    base_state_int = int(bool(state_features.get("on_1b", 0))) * 1 + int(bool(state_features.get("on_2b", 0))) * 2 + int(bool(state_features.get("on_3b", 0))) * 4
-    base_state = _BASE_STATE_DECODE[base_state_int]
-
+    Reads the historical pitches parquet once and runs the league-wide
+    aggregations that used to happen on every per-PA call. Only the small
+    scaled per-player frames (and re24 tables) are retained — the raw
+    parquet is dropped when this function returns.
+    """
     file_path = Path(__file__).parent.parent / "rnn_support_models" / "run_expectancy" / "2025-2025_re24.json"
     with open(file_path) as f:
         re24 = json.load(f)
@@ -405,9 +421,49 @@ def get_optimal_out(pitcher, batter, state_features):
 
     # _FALLBACK = {"strikeout": 1/3, "groundout": 1/3, "flyout": 1/3}
 
-    optimal_out = calculate_optimal_out(pitcher, batter, outs, base_state, pitcher_scaled, batter_scaled, re24, RE24_MAX)
+    return OptimalOutContext(
+        pitcher_scaled=pitcher_scaled,
+        batter_scaled=batter_scaled,
+        re24=re24,
+        RE24_MAX=RE24_MAX,
+    )
 
-    return optimal_out
+
+def get_optimal_out_from_context(
+    ctx: OptimalOutContext, pitcher, batter, state_features
+):
+    """Per-request optimal-out lookup. Cheap: derives (outs, base_state) and
+    runs calculate_optimal_out against the prebuilt scaled frames in ctx.
+    """
+    outs = state_features['outs_when_up']
+    base_state_int = (
+        int(bool(state_features.get("on_1b", 0))) * 1
+        + int(bool(state_features.get("on_2b", 0))) * 2
+        + int(bool(state_features.get("on_3b", 0))) * 4
+    )
+    base_state = _BASE_STATE_DECODE[base_state_int]
+
+    return calculate_optimal_out(
+        pitcher, batter, outs, base_state,
+        ctx.pitcher_scaled, ctx.batter_scaled, ctx.re24, ctx.RE24_MAX,
+    )
+
+
+_default_ctx: Optional[OptimalOutContext] = None
+
+
+def get_optimal_out(pitcher, batter, state_features):
+    """Backwards-compatible single-call API. Builds the heavy context on
+    first use and caches it for subsequent calls in this process. Server
+    code should call build_optimal_out_context() at startup and use
+    get_optimal_out_from_context() instead to avoid the lazy-build cost
+    landing on the first request.
+    """
+    global _default_ctx
+    if _default_ctx is None:
+        _default_ctx = build_optimal_out_context()
+    return get_optimal_out_from_context(_default_ctx, pitcher, batter, state_features)
+
 
 if __name__ == "__main__":
     pitcher = 808967
