@@ -1,3 +1,8 @@
+"""
+Builds the current pitch state by combining initial feature list with 
+newly computed values that occur in the InferenceEngine 
+"""
+
 from __future__ import annotations
 
 from pydantic import BaseModel, create_model

@@ -462,9 +462,3 @@ def get_optimal_location_from_context(
     )
 
     return max(scores, key=scores.get)
-
-
-def get_optimal_location(pitcher, batter, pitch_type: str, state_features: dict) -> str:
-    """Convenience wrapper — builds context and scores in one call."""
-    context = precompute_location_context(pitcher, batter)
-    return get_optimal_location_from_context(context, pitch_type, state_features)

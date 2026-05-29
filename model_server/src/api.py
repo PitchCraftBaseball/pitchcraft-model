@@ -112,9 +112,7 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         "breaking": _load_model_bundle(config_path, "breaking"),
     }
 
-    # These two used to run on every /predict (reading the full historical
-    # pitches parquet + running league-wide aggregations each time). Build
-    # them once at startup and reuse across requests.
+    # cache parquet fetch 
     t0 = time.perf_counter()
     optimal_out_ctx = build_optimal_out_context()
     logger.info("optimal_out context built in %.2fs", time.perf_counter() - t0)
@@ -150,8 +148,12 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
+    
     @app.post("/predict", response_model=PredictResponse)
     async def predict(req: PredictRequest) -> PredictResponse:
+        """
+        Primary endpoint that exposes the model to server clients. 
+        """
         start = time.perf_counter()
         logger.info(
             "predict request: pitcher=%s batter=%s year=%s strategy=%s max_pitches=%s",
@@ -168,8 +170,10 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
+        # resolve the strategy from the request, field can be null which defaults to optimal strategy 
         strategy, pref = handler.resolve_strategy(req)
 
+        # async call to push simulation computations thread queue 
         loop = asyncio.get_running_loop()
         try:
             result: SimulationResult = await loop.run_in_executor(
@@ -194,6 +198,7 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         )
         return response
 
+    # unused batch request endpoint that might work if we had more hardware 
     @app.post("/predict/batch", response_model=BatchPredictResponse)
     async def predict_batch(req: BatchPredictRequest) -> BatchPredictResponse:
         start = time.perf_counter()

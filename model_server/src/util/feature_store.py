@@ -1,3 +1,9 @@
+"""
+Class that includes an interface (I think they call it a template here) 
+that allows us to change which data source we want to query for our historical 
+data.
+"""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -6,7 +12,6 @@ from typing import Dict, Protocol
 
 import pandas as pd
 
-from model_shared.db import get_read_cursor
 from model_shared.feature_engineering.feature_calculator import (
     batter_situation_lookup,
     pitcher_family_lookup,
@@ -108,24 +113,6 @@ class _BaseHistoricalPitchesFeatureStore:
 
     def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
         raise NotImplementedError
-
-
-class SqlHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
-    """Compute situational splits live from the ``historical_pitches`` SQL
-    table. Kept available for explicit opt-in; the parquet-backed store is
-    the default.
-    """
-
-    def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
-        columns = [role, *_HISTORY_COLS]
-        select_list = ", ".join(columns)
-        query = (
-            f"SELECT {select_list} FROM historical_pitches WHERE {role} = %s"
-        )
-        with get_read_cursor() as cursor:
-            cursor.execute(query, (player_id,))
-            rows = cursor.fetchall()
-        return pd.DataFrame(rows, columns=columns)
 
 
 @lru_cache(maxsize=1)

@@ -1,3 +1,9 @@
+"""
+Module that was initially created for the proof-of-concept model server. It 
+features helper methods for preparing tensors and decoding tensors 
+to extract data required for the model's response. 
+"""
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Protocol
@@ -33,7 +39,9 @@ def _encode_num(value: Optional[float]) -> float:
         return 0.0
 
 
-# The `states` array is dynamically generated. We will need to QA this to ensure that the fields are accurately being applied
+"""
+Helps prep data in the InferenceEngine
+"""
 def build_tensors(
     states: List[BaseModel], artifacts: TensorArtifacts
 ) -> tuple[torch.Tensor, torch.Tensor, int]:
@@ -58,14 +66,15 @@ def build_tensors(
     x_num_t = torch.tensor(x_num, dtype=torch.float32).unsqueeze(0)
     return x_cat_t, x_num_t, seq_len
 
-
+"""
+Payload builder
+"""
 def build_pitch_probabilities(
     probs: torch.Tensor,
     artifacts: TensorArtifacts,
     seq_len: int,
     pitch_keys: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, float]]:
-    # Convert model probabilities into a pitch-keyed response payload.
     if pitch_keys is None:
         pitch_keys = [
             "pitch_one",

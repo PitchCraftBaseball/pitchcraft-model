@@ -33,7 +33,10 @@ REQUIRED_STATE_KEYS = [
     "on_3b",
 ]
 
-
+"""
+Class that maintains an InferenceEngine lifetime and the helper methods that used 
+to exist in `api.py`.  
+"""
 class RequestHandler:
     def __init__(self, engine: InferenceEngine) -> None:
         self._engine = engine
