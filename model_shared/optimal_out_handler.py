@@ -228,13 +228,21 @@ def build_optimal_out_context() -> OptimalOutContext:
     pa_df['pitch_group'] = pa_df['pitch_type'].apply(pitch_to_family)
     pa_df['out_type']    = pa_df.apply(out_type_refined, axis=1)
 
+    # calculate_woba mutates its argument in place, adding the per-row wOBA
+    # component columns (uBB, HBP, 1B..HR, AB, IBB, SF). Run it on the parent
+    # before the split so BOTH the batter and pitcher slices carry those
+    # columns (the pitcher walk-rate aggregation below reads 'uBB' too). The
+    # return value here is discarded; the latest-year batter wOBA is computed
+    # from pa_df_b further down.
+    calculate_woba(pa_df)
+
     # Per-player latest-year slices. Done before any per-role aggregation so
     # that batter-side groupbys see only each batter's most recent season and
     # pitcher-side groupbys see only each pitcher's most recent season.
     pa_df_b = _latest_year_per(pa_df, 'batter')
     pa_df_p = _latest_year_per(pa_df, 'pitcher')
 
-    # Do Feature Engineering
+    # Do Feature Engineering — overall batter wOBA from their latest year only.
     woba_df = calculate_woba(pa_df_b)
     woba = woba_df[['wOBA']].reset_index()
 
