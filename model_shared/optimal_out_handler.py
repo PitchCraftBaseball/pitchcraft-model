@@ -40,6 +40,16 @@ def out_type_refined(row):
     else:
         return None
 
+def _latest_year_per(frame: pd.DataFrame, id_col: str) -> pd.DataFrame:
+    """For each player in id_col, keep only their most recent game_year.
+    A player active in 2025 uses 2025; one whose last appearance was 2024
+    uses 2024; etc. Two slices are needed downstream because the same row's
+    "latest year" differs depending on whether you key by batter or pitcher.
+    """
+    max_year = frame.groupby(id_col)['game_year'].transform('max')
+    return frame[frame['game_year'] == max_year]
+
+
 def full_dataframe(pitch_df: pd.DataFrame, woba_pivot: pd.DataFrame ) -> pd.DataFrame:
 
     pitch_df['whiff'] = pitch_df['description'].isin([
@@ -210,19 +220,26 @@ def build_optimal_out_context() -> OptimalOutContext:
     # Gather Data - is this right
     df = pd.read_parquet(
         Path(__file__).parent.parent / "data" / "historical_pitches.parquet")
-    df = df[df["game_year"] == 2025]
+    df = df[df["game_year"].isin([2023, 2024, 2025])]
 
-    data25 = sort_statcast(df)
+    data = sort_statcast(df)
 
-    pa_df = data25[data25["events"].notna() & (data25["events"] != "truncated_pa")].copy()
-
-    # Do Feature Engineering 
-    woba_df = calculate_woba(pa_df)
-    woba = woba_df[['wOBA']].reset_index()
+    pa_df = data[data["events"].notna() & (data["events"] != "truncated_pa")].copy()
     pa_df['pitch_group'] = pa_df['pitch_type'].apply(pitch_to_family)
+    pa_df['out_type']    = pa_df.apply(out_type_refined, axis=1)
+
+    # Per-player latest-year slices. Done before any per-role aggregation so
+    # that batter-side groupbys see only each batter's most recent season and
+    # pitcher-side groupbys see only each pitcher's most recent season.
+    pa_df_b = _latest_year_per(pa_df, 'batter')
+    pa_df_p = _latest_year_per(pa_df, 'pitcher')
+
+    # Do Feature Engineering
+    woba_df = calculate_woba(pa_df_b)
+    woba = woba_df[['wOBA']].reset_index()
 
     # Drop rows where pitch type doesn't fit a group
-    pa_df_grouped = pa_df[pa_df['pitch_group'].notna()]
+    pa_df_grouped = pa_df_b[pa_df_b['pitch_group'].notna()]
 
     # Aggregate by batter AND pitch group
     grouped = pa_df_grouped.groupby(['batter', 'pitch_group'])[
@@ -255,19 +272,44 @@ def build_optimal_out_context() -> OptimalOutContext:
     # A list of batter ids with only qualified batters
     qualified = pa_counts[pa_counts['PA'] >= min_pa]['batter']
 
-    data25['pitch_group'] = data25['pitch_type'].apply(pitch_to_family)
-    pitch_df = data25[data25['pitch_group'].notna()].copy()
-    full_df = full_dataframe(pitch_df, woba_pivot)
+    data['pitch_group'] = data['pitch_type'].apply(pitch_to_family)
+    pitch_df = data[data['pitch_group'].notna()].copy()
 
-    pa_df['out_type'] = pa_df.apply(out_type_refined, axis=1)
-    outs_df = pa_df[(pa_df['events'] == 'field_out') | (pa_df['events'] == 'strikeout')].copy() 
+    # Lift per-row derivations above the role split so both batter and
+    # pitcher slices carry the columns the aggregations need. full_dataframe
+    # also writes these columns; on pitch_df_b that becomes an idempotent
+    # overwrite (its return value is unused downstream).
+    pitch_df['whiff'] = pitch_df['description'].isin([
+        'swinging_strike', 'swinging_strike_blocked', 'foul_tip'
+    ]).astype(int)
+    pitch_df['swing'] = pitch_df['description'].isin([
+        'foul_bunt', 'foul', 'hit_into_play', 'swinging_strike', 'foul_tip',
+        'swinging_strike_blocked', 'missed_bunt', 'bunt_foul_tip'
+    ]).astype(int)
+    pitch_df['gb']            = (pitch_df['bb_type'] == 'ground_ball').astype(int)
+    pitch_df['fly']           = ((pitch_df['bb_type'] == 'fly_ball') | (pitch_df['bb_type'] == 'popup')).astype(int)
+    pitch_df['bip']           = pitch_df['bb_type'].notna().astype(int)
+    pitch_df['popup']         = (pitch_df['bb_type'] == 'popup').astype(int)
+    pitch_df['fly_ball_only'] = (pitch_df['bb_type'] == 'fly_ball').astype(int)
+    pitch_df['hard_hit_fly']  = ((pitch_df['launch_speed'] >= 95) & (pitch_df['bb_type'] == 'fly_ball')).astype(int)
+    pitch_df['barrel']        = (pitch_df['launch_speed_angle'] == 6).astype(int)
+    pitch_df['chase']         = ((pitch_df['zone'] > 9) & (pitch_df['swing'] == 1)).astype(int)
+    pitch_df['out_of_zone']   = (pitch_df['zone'] > 9).astype(int)
+
+    pitch_df_b = _latest_year_per(pitch_df, 'batter')
+    pitch_df_p = _latest_year_per(pitch_df, 'pitcher')
+
+    full_df = full_dataframe(pitch_df_b, woba_pivot)
+
+    outs_df_b = pa_df_b[(pa_df_b['events'] == 'field_out') | (pa_df_b['events'] == 'strikeout')].copy()
+    outs_df_p = pa_df_p[(pa_df_p['events'] == 'field_out') | (pa_df_p['events'] == 'strikeout')].copy()
 
     # Total PAs per batter
-    pa_totals = pa_df.groupby('batter').size().reset_index(name='total_pa')
+    pa_totals = pa_df_b.groupby('batter').size().reset_index(name='total_pa')
 
-    # Out type counts per batter 
+    # Out type counts per batter
     ### MIGHT NEED SOME VALIDATION ###
-    out_counts = outs_df.groupby(['batter', 'out_type']).size().reset_index(name='count')
+    out_counts = outs_df_b.groupby(['batter', 'out_type']).size().reset_index(name='count')
 
     # Merge and calculate rates
     # Out of all the ABs, what percentage does each out type occur?
@@ -282,9 +324,9 @@ def build_optimal_out_context() -> OptimalOutContext:
 
     # # --- Pitcher out type tendencies ---
     # # Same logic but for pitchers
-    pitcher_pa_totals = pa_df.groupby('pitcher').size().reset_index(name='total_pa')
+    pitcher_pa_totals = pa_df_p.groupby('pitcher').size().reset_index(name='total_pa')
 
-    pitcher_out_counts = outs_df.groupby(['pitcher', 'out_type']).size().reset_index(name='count')
+    pitcher_out_counts = outs_df_p.groupby(['pitcher', 'out_type']).size().reset_index(name='count')
 
     pitcher_out_rates = pitcher_out_counts.merge(pitcher_pa_totals, on='pitcher', how='left')
     pitcher_out_rates['rate'] = pitcher_out_rates['count'] / pitcher_out_rates['total_pa']
@@ -295,7 +337,7 @@ def build_optimal_out_context() -> OptimalOutContext:
     pitcher_out_profile.columns.name = None
 
     # --- Batter features ---
-    batter_features = pitch_df.groupby(['batter']).agg(
+    batter_features = pitch_df_b.groupby(['batter']).agg(
         swings        = ('swing', 'sum'),
         whiffs        = ('whiff', 'sum'),
         bip           = ('bip', 'sum'),
@@ -315,13 +357,11 @@ def build_optimal_out_context() -> OptimalOutContext:
     batter_features['hard_hit_fly_rate'] = batter_features['hard_hit_fly'] / batter_features['fly_ball_only']
     batter_features['barrel_rate']       = batter_features['barrels'] / batter_features['bip']
 
-    # In the batter feature engineering section, where chase_rates is computed
-
     # Contact rate
     batter_features['contact_rate'] = 1 - batter_features['whiff_rate']  # already have whiffs/swings
 
     # Walk rate — needs PA-level data
-    walk_rates = pa_df.groupby('batter').agg(
+    walk_rates = pa_df_b.groupby('batter').agg(
         walks = ('uBB', 'sum'),
         total_pa = ('events', 'count')
     ).reset_index()
@@ -337,13 +377,7 @@ def build_optimal_out_context() -> OptimalOutContext:
     batter_features = batter_features.merge(batter_out_profile, on='batter', how='left')
 
     # Add chase rate (swings on pitches outside zone)
-    pitch_df['chase'] = (
-        (pitch_df['zone'] > 9) &  # zones 11-14 are outside the zone in Statcast
-        (pitch_df['swing'] == 1)
-    ).astype(int)
-    pitch_df['out_of_zone'] = (pitch_df['zone'] > 9).astype(int)
-
-    chase_rates = pitch_df.groupby('batter').agg(
+    chase_rates = pitch_df_b.groupby('batter').agg(
         chases       = ('chase', 'sum'),
         out_of_zone  = ('out_of_zone', 'sum')
     ).reset_index()
@@ -355,7 +389,7 @@ def build_optimal_out_context() -> OptimalOutContext:
     pitcher_features = pitcher_out_profile.copy()
 
     # Add pitcher whiff, gb, chase rates
-    pitcher_pitch = pitch_df.groupby('pitcher').agg(
+    pitcher_pitch = pitch_df_p.groupby('pitcher').agg(
         swings      = ('swing', 'sum'),
         whiffs      = ('whiff', 'sum'),
         bip         = ('bip', 'sum'),
@@ -380,7 +414,7 @@ def build_optimal_out_context() -> OptimalOutContext:
     pitcher_features['contact_rate'] = 1 - pitcher_features['raw_whiff_rate']
     pitcher_features = pitcher_features.drop(columns=['raw_whiff_rate'])
 
-    pitcher_walk_rates = pa_df.groupby('pitcher').agg(
+    pitcher_walk_rates = pa_df_p.groupby('pitcher').agg(
         walks = ('uBB', 'sum'),
         total_pa = ('events', 'count')
     ).reset_index()
