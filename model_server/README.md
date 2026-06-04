@@ -122,7 +122,7 @@ curl -s -X POST http://localhost:8001/predict \
       "pitcher": "668933",
       "batter":  "695657",
       "year": 2025,
-      "strategy": "argmax",
+      "strategy": "preferred",
       "max_pitches": 12,
       "preferred_out_type": "groundout",
       "state_features": {
