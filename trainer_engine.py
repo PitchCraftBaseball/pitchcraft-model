@@ -69,7 +69,7 @@ EMB_DIMS = {
 }
 
 MODEL_HYPERPARAMETERS = {
-    'smoothing_weights': 0.33,
+    'smoothing_weights': 0.25,
     'epochs': 20,
     'model_layers': 2,
     'optimizer_lr': 0.001,
@@ -117,5 +117,5 @@ def main():
     evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
 
 if __name__ == "__main__":
-    #main()
-    evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])
+    main()
+    #evaluate_rnn(emb_dims=EMB_DIMS, num_layers=MODEL_HYPERPARAMETERS["model_layers"], use_arsenal_mask=False, hidden=MODEL_HYPERPARAMETERS['hidden_size'])

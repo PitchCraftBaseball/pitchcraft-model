@@ -1,25 +1,37 @@
-"""
-Tests for data preprocessing: sort_statcast, universal_features,
-calculate_target_variable, split_by_pa_id, data_remapping.
-"""
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from model_shared.feature_engineering.data_preprocessor import (
+    clean_data,
     data_remapping,
+    drop_unused_cols,
     sort_statcast,
     universal_features,
 )
 from pitch_rnn.pitch_rnn_trainer import calculate_target_variable, split_by_pa_id
 
-from tests.conftest import make_target_df, make_universal_df
+from rnn_tests.conftest import make_target_df, make_universal_df
 
 
-# ===========================================================================
-# 1. sort_statcast
-# ===========================================================================
+def _make_clean_data_df(pitches, at_bat_numbers=None):
+    """Minimal DataFrame that satisfies all four steps of clean_data."""
+    n = len(pitches)
+    if at_bat_numbers is None:
+        at_bat_numbers = [1] * n
+    return pd.DataFrame({
+        "game_date": "2024-04-01",
+        "game_pk": 1,
+        "game_type": "R",
+        "inning": 1,
+        "inning_topbot": "Top",
+        "at_bat_number": at_bat_numbers,
+        "pitch_number": range(1, n + 1),
+        "pitch_type": pitches,
+        "description": "ball",
+        "player_name": "John Doe",
+        "sv_id": "abc123",
+    })
 
 
 def test_sort_statcast_ascending_order():
@@ -79,11 +91,6 @@ def test_sort_statcast_ascending_order():
 
     # Pitch numbers within an at-bat are ascending
     assert list(result["pitch_number"][:2]) == [1, 2]
-
-
-# ===========================================================================
-# 2–8. universal_features
-# ===========================================================================
 
 
 def test_universal_features_game_type_filter():
@@ -174,10 +181,6 @@ def test_universal_features_seq_len():
     assert (pa2["seq_len"] == 2).all()
 
 
-# ===========================================================================
-# 9–12. calculate_target_variable
-# ===========================================================================
-
 
 def test_calculate_target_is_real_pitch_false_for_IGNORE():
     """IGNORE pitches get is_real_pitch==False; valid pitches get True."""
@@ -229,11 +232,6 @@ def test_calculate_target_excludes_non_real_targets():
     assert "FF" not in pitch_types_in_result  # followed by IGNORE → excluded
 
 
-# ===========================================================================
-# 13–15. split_by_pa_id
-# ===========================================================================
-
-
 def test_split_by_pa_id_ratio_assertion():
     """Ratios that don't sum to 1.0 raise AssertionError."""
     df = pd.DataFrame({"pa_id": [f"pa{i}" for i in range(10)]})
@@ -264,11 +262,6 @@ def test_split_by_pa_id_reproducibility():
     assert test_ids_a == test_ids_b
 
 
-# ===========================================================================
-# 16–17. data_remapping
-# ===========================================================================
-
-
 def test_data_remapping_pitch_types():
     """SC→'CU', CS→'CU', FO→'FS'; unrelated types are unchanged."""
     df = pd.DataFrame(
@@ -293,3 +286,70 @@ def test_data_remapping_ABS_override():
     assert result.iloc[0]["pitch_type"] == "ABS"
     assert result.iloc[1]["pitch_type"] == "ABS"
     assert result.iloc[2]["pitch_type"] == "SL"  # untouched
+
+
+def test_drop_unused_cols_removes_known_columns():
+    """Columns in the hard-coded drop list are removed from the output."""
+    df = pd.DataFrame({
+        "pitch_type": ["FF"],
+        "player_name": ["John Doe"],
+        "sv_id": ["abc"],
+        "spin_dir": [0.5],
+    })
+    result = drop_unused_cols(df)
+    assert "player_name" not in result.columns
+    assert "sv_id" not in result.columns
+    assert "spin_dir" not in result.columns
+    assert "pitch_type" in result.columns
+
+
+def test_drop_unused_cols_ignores_absent_columns():
+    """No error is raised when drop-list columns are absent (errors='ignore')."""
+    df = pd.DataFrame({"pitch_type": ["FF", "SL"], "game_pk": [1, 1]})
+    result = drop_unused_cols(df)
+    assert set(result.columns) == {"pitch_type", "game_pk"}
+
+
+def test_drop_unused_cols_preserves_non_drop_columns():
+    """Columns not in the drop list are kept intact."""
+    df = pd.DataFrame({
+        "pitch_type": ["FF"],
+        "balls": [1],
+        "strikes": [2],
+        "player_name": ["Jane"],
+    })
+    result = drop_unused_cols(df)
+    assert "balls" in result.columns
+    assert "strikes" in result.columns
+
+
+def test_clean_data_remaps_pitch_types():
+    """clean_data remaps SC→CU via data_remapping."""
+    df = _make_clean_data_df(["SC", "FF"])
+    result = clean_data(df)
+    assert "SC" not in result["pitch_type"].values
+    assert "CU" in result["pitch_type"].values
+
+
+def test_clean_data_drops_unused_columns():
+    """clean_data removes drop-list columns (player_name, sv_id)."""
+    df = _make_clean_data_df(["FF"])
+    result = clean_data(df)
+    assert "player_name" not in result.columns
+    assert "sv_id" not in result.columns
+
+
+def test_clean_data_filters_non_regular_games():
+    """clean_data removes non-regular-season rows via universal_features."""
+    df = _make_clean_data_df(["FF"])
+    df["game_type"] = "S"  # spring training
+    result = clean_data(df)
+    assert len(result) == 0
+
+
+def test_clean_data_adds_pa_id():
+    """clean_data produces a pa_id column formatted as '{game_pk}_{at_bat_number}'."""
+    df = _make_clean_data_df(["FF"])
+    result = clean_data(df)
+    assert "pa_id" in result.columns
+    assert result.iloc[0]["pa_id"] == "1_1"

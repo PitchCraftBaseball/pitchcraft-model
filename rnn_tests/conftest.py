@@ -6,12 +6,8 @@ import pandas as pd
 import pytest
 from sklearn.preprocessing import StandardScaler
 
-# Ensure the project root is importable when pytest is invoked from any cwd.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# ---------------------------------------------------------------------------
-# Shared feature spec (minimal – 3 cat cols, 2 num cols)
-# ---------------------------------------------------------------------------
 
 MINI_FEATURE_SPEC = {
     "target": "y_next_pitch_type",
@@ -23,11 +19,6 @@ MINI_FEATURE_SPEC = {
 @pytest.fixture
 def feature_spec():
     return MINI_FEATURE_SPEC
-
-
-# ---------------------------------------------------------------------------
-# Vocabulary fixtures
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -44,22 +35,12 @@ def sample_y_vocab():
     return {"FF": 1, "SL": 2, "CH": 3}
 
 
-# ---------------------------------------------------------------------------
-# Scaler fixture
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def fitted_scaler():
     scaler = StandardScaler()
     train = pd.DataFrame({"outs_when_up": [0.0, 1.0, 2.0], "inning": [1.0, 5.0, 9.0]})
     scaler.fit(train)
     return scaler
-
-
-# ---------------------------------------------------------------------------
-# DataFrame builder helpers (importable by individual test modules)
-# ---------------------------------------------------------------------------
 
 
 def make_sort_df(rows):

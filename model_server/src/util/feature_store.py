@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Protocol
+from typing import Dict, Protocol, Optional
 
 import pandas as pd
 
@@ -31,6 +30,7 @@ _PITCHER_FAMILY_COLS = [
 ]
 
 _HISTORY_COLS = ["balls", "strikes", "pitch_type", "description"]
+_HANDEDNESS_COLS = ["stand", "p_throws"]
 
 _HISTORICAL_PITCHES_PATH = (
     Path(__file__).resolve().parents[3] / "data" / "historical_pitches.parquet"
@@ -58,14 +58,12 @@ class _BaseHistoricalPitchesFeatureStore:
     in lockstep.
     """
 
-    @lru_cache(maxsize=1024)
     def _get_pitcher_lookup(self, pitcher_id: str) -> pd.DataFrame:
         df = self._load_player_history("pitcher", pitcher_id)
         if df.empty:
             return pd.DataFrame()
         return pitcher_situation_lookup(df)
 
-    @lru_cache(maxsize=1024)
     def _get_batter_lookup(self, batter_id: str) -> pd.DataFrame:
         df = self._load_player_history("batter", batter_id)
         if df.empty:
@@ -127,8 +125,6 @@ class SqlHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
             rows = cursor.fetchall()
         return pd.DataFrame(rows, columns=columns)
 
-
-@lru_cache(maxsize=1)
 def _load_historical_pitches() -> pd.DataFrame:
     if not _HISTORICAL_PITCHES_PATH.exists():
         raise FileNotFoundError(
@@ -137,12 +133,23 @@ def _load_historical_pitches() -> pd.DataFrame:
 
     df = pd.read_parquet(
         _HISTORICAL_PITCHES_PATH,
-        columns=["batter", "pitcher", *_HISTORY_COLS],
+        columns=["batter", "pitcher", *_HISTORY_COLS, *_HANDEDNESS_COLS],
     )
     df = df.copy()
     df["_batter_id"] = df["batter"].astype("Int64").astype(str)
     df["_pitcher_id"] = df["pitcher"].astype("Int64").astype(str)
     return df
+
+
+def get_handedness_from_parquet(player_id: str, is_batter: bool) -> Optional[str]:
+    """Return batter side or pitcher arm using the already-loaded parquet — no DB round-trip."""
+    df = _load_historical_pitches()
+    id_col = "_batter_id" if is_batter else "_pitcher_id"
+    col = "stand" if is_batter else "p_throws"
+    matches = df[df[id_col] == str(player_id)]
+    if matches.empty:
+        return None
+    return str(matches[col].iloc[0])
 
 
 class ParquetHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
@@ -153,7 +160,6 @@ class ParquetHistoricalPitchesFeatureStore(_BaseHistoricalPitchesFeatureStore):
     no DB round-trip.
     """
 
-    @lru_cache(maxsize=1024)
     def _load_player_history(self, role: str, player_id: str) -> pd.DataFrame:
         df = _load_historical_pitches()
         id_col = "_batter_id" if role == "batter" else "_pitcher_id"
