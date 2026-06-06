@@ -1,21 +1,13 @@
-"""
-Tests for training utilities: FocalLoss, calculate_class_weights, EarlyStopping,
-and the calculate_class_weights helper.
-"""
-
 import numpy as np
 import pytest
 import torch
 import torch.nn as nn
 
-from pitch_rnn.pitch_rnn_trainer import FocalLoss, calculate_class_weights
+import pandas as pd
+
+from pitch_rnn.pitch_rnn_trainer import FocalLoss, calculate_class_weights, rnn_training_handler, _validate_feature_columns
 from pitch_rnn.early_stopping import EarlyStopping
 from model_shared.feature_engineering.pitch_constants import PAD_ID
-
-
-# ===========================================================================
-# FocalLoss
-# ===========================================================================
 
 
 def test_focal_loss_ignores_pad_index():
@@ -49,10 +41,11 @@ def test_focal_loss_reduces_easy_examples():
     loss_fn_focal = FocalLoss(gamma=2.0, ignore_index=PAD_ID)
     loss_fn_ce = nn.CrossEntropyLoss(ignore_index=PAD_ID)
 
-    # Construct logits where the correct class has very high probability
+    # Construct logits where the correct class has very high probability.
+    # Values must be moderate enough that float32 CE is non-zero (10.0 saturates to 0.0).
     num_classes = 5
-    logits = torch.full((10, num_classes), -10.0)
-    logits[:, 1] = 10.0  # class 1 is almost certainly predicted
+    logits = torch.full((10, num_classes), -5.0)
+    logits[:, 1] = 5.0  # class 1 is almost certainly predicted
     targets = torch.ones(10, dtype=torch.long)  # correct class is 1
 
     focal = loss_fn_focal(logits, targets)
@@ -69,10 +62,6 @@ def test_focal_loss_non_negative():
     loss = loss_fn(logits, targets)
     assert loss.item() >= 0.0
 
-
-# ===========================================================================
-# calculate_class_weights
-# ===========================================================================
 
 
 def test_calculate_class_weights_pads_excluded():
@@ -106,11 +95,6 @@ def test_calculate_class_weights_smoothing_zero_gives_raw_inverse():
     assert weights[2].item() == pytest.approx(1.0)
     # Absent class → 0
     assert weights[3].item() == pytest.approx(0.0)
-
-
-# ===========================================================================
-# EarlyStopping
-# ===========================================================================
 
 
 class _DummyModel(nn.Module):
@@ -176,3 +160,84 @@ def test_early_stopping_delta_prevents_premature_trigger():
     es(0.96, model)             # improvement of 0.02 < delta → counter increments
     assert es.counter == 2
     assert es.early_stop        # patience=2 exhausted
+
+
+# Feature spec used for handler validation tests; includes count_state so we
+# can exercise both the cat_col and target missing-column paths.
+_HANDLER_SPEC = {
+    "target": "y_next_pitch_type",
+    "cat_cols": ["pitcher", "stand", "count_state"],
+    "num_cols": ["outs_when_up"],
+}
+
+
+def _valid_handler_df() -> pd.DataFrame:
+    """Minimal DataFrame containing every column in _HANDLER_SPEC."""
+    return pd.DataFrame({
+        "pitcher":          [100],
+        "stand":            ["R"],
+        "count_state":      ["0-0"],
+        "outs_when_up":     [1],
+        "y_next_pitch_type": ["FF"],
+    })
+
+
+def test_validate_no_missing_columns_passes():
+    """All required columns present → no exception raised."""
+    _validate_feature_columns(_valid_handler_df(), _HANDLER_SPEC)
+
+
+def test_validate_missing_cat_col_raises_key_error():
+    """A cat_col absent from the DataFrame raises a descriptive KeyError."""
+    df = _valid_handler_df().drop(columns=["count_state"])
+    with pytest.raises(KeyError, match="count_state"):
+        _validate_feature_columns(df, _HANDLER_SPEC)
+
+
+def test_validate_missing_target_col_raises_key_error():
+    """The target column absent from the DataFrame raises a descriptive KeyError."""
+    df = _valid_handler_df().drop(columns=["y_next_pitch_type"])
+    with pytest.raises(KeyError, match="y_next_pitch_type"):
+        _validate_feature_columns(df, _HANDLER_SPEC)
+
+
+def test_validate_multiple_missing_cols_all_listed():
+    """All missing columns are named together in the error message."""
+    df = _valid_handler_df().drop(columns=["count_state", "y_next_pitch_type"])
+    with pytest.raises(KeyError) as exc_info:
+        _validate_feature_columns(df, _HANDLER_SPEC)
+    assert "count_state" in str(exc_info.value)
+    assert "y_next_pitch_type" in str(exc_info.value)
+
+
+# --- rnn_training_handler integration: error raised before training loop ---
+
+def test_handler_missing_cat_col_raises_before_training():
+    """TEST_MISSING_CAT_COLS: dropping a cat_col causes the handler to raise
+    immediately — no feature engineering or training loop is entered."""
+    df = _valid_handler_df().drop(columns=["count_state"])
+    with pytest.raises(KeyError, match="count_state"):
+        rnn_training_handler(df, _HANDLER_SPEC, custom_emb_dims=None, model_params=None)
+
+
+def test_handler_missing_target_col_raises_before_training():
+    """Dropping the target column causes the handler to raise immediately —
+    vocabulary construction and the training loop are never reached."""
+    df = _valid_handler_df().drop(columns=["y_next_pitch_type"])
+    with pytest.raises(KeyError, match="y_next_pitch_type"):
+        rnn_training_handler(df, _HANDLER_SPEC, custom_emb_dims=None, model_params=None)
+
+
+def test_validate_missing_num_col_raises_key_error():
+    """A num_col absent from the DataFrame raises a descriptive KeyError."""
+    df = _valid_handler_df().drop(columns=["outs_when_up"])
+    with pytest.raises(KeyError, match="outs_when_up"):
+        _validate_feature_columns(df, _HANDLER_SPEC)
+
+
+def test_handler_missing_num_col_raises_before_training():
+    """TEST_MISSING_NUM_COLS: dropping a num_col causes the handler to raise
+    immediately — the missing column is not silently zeroed out."""
+    df = _valid_handler_df().drop(columns=["outs_when_up"])
+    with pytest.raises(KeyError, match="outs_when_up"):
+        rnn_training_handler(df, _HANDLER_SPEC, custom_emb_dims=None, model_params=None)

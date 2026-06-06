@@ -23,6 +23,7 @@ import torch.nn.functional as F
 BASE = Path(__file__).parent.parent  # repo root (one level above pitch_rnn / model_eval)
 
 def load_model_and_vocabs(vocab_path: str, model_path: str, emb_dims, num_layers, hidden):
+    """Reconstruct PitchRNN from saved weights and vocab files, returning model, vocabs, and feature spec."""
     cat_vocabs, y_vocab, feature_spec = load_vocabs(vocab_path)
     NUM_COLS = feature_spec["num_cols"]
 
@@ -47,12 +48,14 @@ def load_model_and_vocabs(vocab_path: str, model_path: str, emb_dims, num_layers
 
 
 def load_test_loader(tensors_path: str, batch_size: int = 64) -> DataLoader:
+    """Load saved test tensors from disk and wrap them in a shuffled-off DataLoader."""
     tensors = torch.load(tensors_path, map_location="cpu")
     dataset = PitchSeqDS(tensors["Xc"], tensors["Xn"], tensors["Y"])
     return DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
 
 def load_arsenals(arsenals_path: str = None) -> dict:
+    """Load the pitcher arsenal JSON, defaulting to the shared arsenals_all.json in the repo."""
     if arsenals_path is None:
         arsenals_path = BASE.parent / "pitch_arsenal" / "arsenals_all.json"
     with open(arsenals_path) as f:
@@ -61,6 +64,7 @@ def load_arsenals(arsenals_path: str = None) -> dict:
     return arsenals
 
 def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
+    """Return a (num_pitchers+1, num_classes) mask zeroing out pitches outside each pitcher's known arsenal."""
     pitcher_vocab = cat_vocabs["pitcher"]
         
     masks = torch.ones(len(pitcher_vocab) + 1, num_classes)
@@ -90,6 +94,7 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
 # ── Prediction helpers ────────────────────────────────────────────────────────
 
 def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature=1.0):
+    """Run inference over the full test loader and return flattened arrays of true and predicted labels."""
     model.eval()
     all_preds, all_true = [], []
 
@@ -119,6 +124,7 @@ def get_all_predictions(model, test_loader, device, arsenal_masks=None, pad_id=P
 # ── Evaluation functions ──────────────────────────────────────────────────────
 
 def get_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature = 1.0):
+    """Compute and print top-1 token accuracy over all non-pad positions."""
     y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
     accuracy = 100 * (y_pred == y_true).sum() / len(y_true)
     print(f"Token Accuracy (no PAD): {accuracy:.2f}%")
@@ -126,6 +132,7 @@ def get_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, 
 
 
 def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_id=PAD_ID, temperature = 1.0):
+    """Compute and print top-K accuracy, checking whether the true label falls in the K highest-scoring predictions."""
     model.eval()
     correct, total = 0, 0
 
@@ -155,6 +162,7 @@ def get_top_k_accuracy(model, test_loader, device, arsenal_masks=None, K=3, pad_
 
 
 def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_masks=None, top_n=5, pad_id=PAD_ID, temperature=1.0):
+    """Tally and print the top_n most frequently predicted pitch types across the test set."""
     model.eval()
     counts = Counter()
 
@@ -184,6 +192,7 @@ def get_most_common_pitches(model, test_loader, device, id_to_pitch, arsenal_mas
 
 
 def print_classification_report(model, test_loader, device, id_to_pitch, arsenal_masks=None, pad_id=PAD_ID, temperature = 1.0):
+    """Print and return a per-class precision/recall/F1 classification report."""
     y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
     labels       = sorted(id_to_pitch.keys())
     target_names = [id_to_pitch[l] for l in labels]
@@ -197,6 +206,7 @@ def generate_confusion_matrix(
     figsize=(12, 10), save_dir: str = None,
     temperature = 1.0
 ):
+    """Plot a row-normalized confusion matrix heatmap and optionally save it to disk."""
     y_true, y_pred = get_all_predictions(model, test_loader, device, arsenal_masks, pad_id, temperature)
 
     labels      = sorted(id_to_pitch.keys())
@@ -243,6 +253,7 @@ def generate_calibration_curves(
     arsenal_masks=None, pad_id=PAD_ID,
     n_bins=5, figsize=(8, 7), save_dir: str = None
 ):
+    """Plot per-class calibration curves comparing predicted probabilities to observed rates."""
     model.eval()
     all_logits, all_targets = [], []
 
@@ -316,6 +327,7 @@ def generate_calibration_curves(
     plt.show()
 
 def find_optimal_temperature(model, test_loader, device, pad_id=PAD_ID):
+    """Use LBFGS to find the temperature scalar that minimizes NLL on the test set."""
     model.eval()
     all_logits, all_targets = [], []
 
@@ -354,6 +366,7 @@ def find_optimal_temperature(model, test_loader, device, pad_id=PAD_ID):
     return optimal_temp
 
 def get_positional_accuracy(model, test_loader, device, arsenal_masks=None, pad_id=PAD_ID, temperature=1.0):
+    """Report per-pitch-position accuracy within a plate appearance sequence."""
     model.eval()
     # Accumulate correct/total per sequence position
     from collections import defaultdict
@@ -403,7 +416,7 @@ def evaluate_model_complete(
     confusion_matrix_save_dir: str = None,
     temperature: float = 1.0,
 ):
-
+    """Run all evaluation functions and return a summary dict of metrics and plots."""
     print("\n1. Token Accuracy:")
     acc = get_accuracy(model, test_loader, device, arsenal_masks, pad_id, temperature=temperature)
 
@@ -449,6 +462,7 @@ def evaluate_model_complete(
     }
 
 def evaluate_rnn(emb_dims, num_layers, use_arsenal_mask, hidden):
+    """Top-level entry point: load the latest artifacts, calibrate temperature, and run full evaluation."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     BASE = Path(__file__).parent.parent.parent  # evaluations/pitch_rnn -> evaluations -> repo root

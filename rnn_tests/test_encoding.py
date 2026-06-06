@@ -1,8 +1,3 @@
-"""
-Tests for vocabulary building and DataFrame encoding.
-(tests 18-27)
-"""
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -12,11 +7,6 @@ from pitch_rnn.encoder import build_vocab, encode, encode_df
 from model_shared.feature_engineering.pitch_constants import PAD_ID
 
 from rnn_tests.conftest import MINI_FEATURE_SPEC
-
-
-# ===========================================================================
-# 18–20. build_vocab
-# ===========================================================================
 
 
 def test_build_vocab_ids_start_at_1():
@@ -43,11 +33,6 @@ def test_build_vocab_unique_ids():
     assert len(set(vocab.values())) == 3  # all IDs distinct
 
 
-# ===========================================================================
-# 21–23. encode
-# ===========================================================================
-
-
 def test_encode_known_values():
     """Mapped values match the vocab; result dtype is int."""
     vocab = {"FF": 1, "SL": 2}
@@ -71,11 +56,6 @@ def test_encode_NaN_maps_to_PAD():
     series = pd.Series(["FF", np.nan, "SL"])
     result = encode(series, vocab)
     assert result.iloc[1] == PAD_ID
-
-
-# ===========================================================================
-# 24–27. encode_df
-# ===========================================================================
 
 
 def _make_encode_df_input(n=10):

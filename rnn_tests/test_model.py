@@ -1,17 +1,8 @@
-"""
-Tests for the PitchRNN model definition.
-Covers instantiation, forward-pass shapes, and embedding behaviour.
-"""
-
 import torch
 import pytest
 
 from model_shared.rnn_definition import PitchRNN
 
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
 
 _CAT_VOCAB_SIZES = {"pitcher": 50, "stand": 3, "prev_pitch_type": 20}
 _EMB_DIMS = {"pitcher": 16, "stand": 4, "prev_pitch_type": 8}
@@ -40,10 +31,6 @@ def _make_batch(batch=_BATCH, seq=_SEQ, n_cat=len(_CAT_VOCAB_SIZES), n_num=_NUM_
     x_num = torch.randn(batch, seq, n_num)
     return x_cat, x_num
 
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_model_output_shape(model):

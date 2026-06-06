@@ -19,6 +19,7 @@ from pitch_rnn.export_artifacts import *
 
 
 def calculate_target_variable(data: pd.DataFrame) -> pd.DataFrame:
+    """Build next-pitch target columns and filter to rows with a valid subsequent pitch."""
     data["is_real_pitch"] = data["pitch_type"].notna() & (~data["pitch_type"].isin(IGNORE))
     data["target_is_real_pitch"] = data.groupby("pa_id")["is_real_pitch"].shift(-1)
     data["y_next_pitch_type"] = data.groupby("pa_id")["pitch_type"].shift(-1)
@@ -42,6 +43,7 @@ def calculate_target_variable(data: pd.DataFrame) -> pd.DataFrame:
 # randomly select plate appearances to be a part of training and test sets
 
 def apply_pitcher_lookup(train_df, test_df):
+    """Left-join pitcher count-split statistics from the training set onto the test set."""
     pitcher_cols = ["pitcher", "count_situation", "pitcher_sit_n",
                     "pitcher_sit_fb_rate", "pitcher_sit_br_rate",
                     "pitcher_sit_os_rate", "pitcher_sit_whiff_rate"]
@@ -49,17 +51,20 @@ def apply_pitcher_lookup(train_df, test_df):
     return test_df.merge(lookup, on=["pitcher", "count_situation"], how="left")
 
 def apply_batter_lookup(train_df, test_df):
+    """Left-join batter count-split statistics from the training set onto the test set."""
     batter_cols = ["batter", "count_situation", "batter_sit_n",
                    "batter_sit_swing_rate", "batter_sit_whiff_rate"]
     lookup = train_df[batter_cols].drop_duplicates(subset=["batter", "count_situation"])
     return test_df.merge(lookup, on=["batter", "count_situation"], how="left")
 
 def apply_pitcher_family_lookup(train_df, test_df):
+    """Left-join pitcher pitch-family rate stats from the training set onto the test set."""
     family_cols = ["pitcher", "pitcher_family_fb_rate", "pitcher_family_br_rate", "pitcher_family_os_rate"]
     lookup = train_df[family_cols].drop_duplicates(subset=["pitcher"])
     return test_df.merge(lookup, on="pitcher", how="left")
 
 def split_by_pa_id(df: pd.DataFrame, pa_col="pa_id", ratios=(0.8, 0.2), seed: int=42):
+    """Randomly shuffle and split unique plate appearances into train/test subsets by ratio."""
     r_train, r_test = ratios
     assert abs((r_train + r_test) - 1.0) < 1e-9
 
@@ -80,6 +85,7 @@ def split_by_pa_id(df: pd.DataFrame, pa_col="pa_id", ratios=(0.8, 0.2), seed: in
     return train_df, test_df, train_ids, test_ids
 
 def split_by_year(df: pd.DataFrame, test_year: int = 2025, train_start_year: int = None, pa_col: str = "pa_id") -> tuple:
+    """Split data by game year, holding out test_year and optionally bounding the training window."""
     train_df = df[(df["game_year"] < test_year)]
     
     if train_start_year is not None:
@@ -99,6 +105,7 @@ def split_by_year(df: pd.DataFrame, test_year: int = 2025, train_start_year: int
 
 
 def make_fixed_sequences(df, feature_spec, pa_col="pa_id", max_len=8):
+    """Pack plate-appearance rows into fixed-length padded tensors for categorical, numerical, and target features."""
     CAT_COLS    = feature_spec["cat_cols"]
     NUM_COLS    = feature_spec["num_cols"]
     cat_id_cols = [c + "_id" for c in CAT_COLS]
@@ -132,6 +139,7 @@ def make_fixed_sequences(df, feature_spec, pa_col="pa_id", max_len=8):
     )
 
 def calculate_class_weights(y_train, num_classes, pad_id=0, smoothing=0.35):
+    """Compute smoothed inverse-frequency class weights, excluding pad tokens."""
     y_flat = y_train.flatten()
     y_flat = y_flat[y_flat != pad_id]
 
@@ -148,6 +156,7 @@ def calculate_class_weights(y_train, num_classes, pad_id=0, smoothing=0.35):
     return weight_tensor
 
 def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
+    """Return a (num_pitchers+1, num_classes) mask zeroing out pitches outside each pitcher's known arsenal."""
     pitcher_vocab = cat_vocabs["pitcher"]
         
     masks = torch.ones(len(pitcher_vocab) + 1, num_classes)
@@ -175,6 +184,7 @@ def build_arsenal_masks(arsenals, cat_vocabs, y_vocab, num_classes, year):
     return masks
 
 def build_balanced_sampler(Y_train, pad_id=PAD_ID):
+    """Create a WeightedRandomSampler that upsamples rare pitch classes using each sequence's first real target."""
     # Get the first non-PAD target per sequence as the sequence label
     sequence_labels = []
     for seq in Y_train:
@@ -200,6 +210,7 @@ def build_balanced_sampler(Y_train, pad_id=PAD_ID):
     )
 
 def train_model(model, train_loader, test_loader, criterion, optimizer, scheduler, early_stopping, device, num_classes):
+    """Run the training loop with gradient clipping, LR scheduling, and early stopping; loads best weights on exit."""
     epochs = 20
     for epoch in range(epochs):
         model.train()
@@ -254,12 +265,14 @@ def train_model(model, train_loader, test_loader, criterion, optimizer, schedule
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, weight=None, ignore_index=0):
+        """Initialize with focusing exponent gamma, optional per-class weights, and a pad ignore index."""
         super().__init__()
         self.gamma = gamma
         self.weight = weight
         self.ignore_index = ignore_index
 
     def forward(self, logits, targets):
+        """Compute focal loss, down-weighting easy examples and masking pad tokens."""
         ce_loss = F.cross_entropy(
             logits, targets,
             weight=self.weight,
@@ -269,9 +282,28 @@ class FocalLoss(nn.Module):
         pt = torch.exp(-ce_loss)  # probability of correct class
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
         non_pad_mask = (targets != self.ignore_index)
+        if non_pad_mask.sum() == 0:
+            return torch.tensor(0.0, device=logits.device, requires_grad=True)
         return focal_loss[non_pad_mask].mean()
 
+def _validate_feature_columns(df: pd.DataFrame, feature_spec: dict) -> None:
+    """Raise KeyError if any column declared in feature_spec is absent from df."""
+    required = (
+        [feature_spec["target"]]
+        + feature_spec.get("cat_cols", [])
+        + feature_spec.get("num_cols", [])
+    )
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise KeyError(
+            f"DataFrame is missing columns required by feature_spec: {missing}"
+        )
+
+
 def rnn_training_handler(data: pd.DataFrame, feature_spec, custom_emb_dims, model_params, model_type: str = "group"):
+    """End-to-end pipeline: feature engineering, encoding, training, and artifact export for the pitch RNN."""
+    _validate_feature_columns(data, feature_spec)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     TARGET_COL = feature_spec["target"]

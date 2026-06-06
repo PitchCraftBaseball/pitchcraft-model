@@ -27,13 +27,12 @@ from model_shared.location_helper import (
     FALLBACK_LOCATION,
 )
 
-from .feature_store import FeatureStore
+from .feature_store import FeatureStore, get_handedness_from_parquet
 from .pitch_state_builder import build_pitch_state_from_features, MissingFeaturesError
 from .pitchcraft_inference_helper import build_pitch_probabilities, build_tensors
-from .players_accessor import fetch_handedness
 
 COMPOSITE_CONFIG = {
-    "rnn_weight": 2,
+    "rnn_weight": 2.5,
     "out_type_weight": 2,
     "run_expectancy_weight": 1
 }
@@ -119,6 +118,11 @@ class InferenceEngine:
             for group_name, (arts, _) in sub_bundles.items()
         }
 
+        self._all_required_cols: List[str] = list(
+            set(group_artifacts.cat_cols) | set(group_artifacts.num_cols)
+            | {col for arts, _ in sub_bundles.values() for col in (*arts.cat_cols, *arts.num_cols)}
+        )
+
     def simulate_plate_appearance(
         self,
         *,
@@ -134,10 +138,10 @@ class InferenceEngine:
         if strategy == "sample" and rng is None:
             rng = np.random.default_rng()
 
-        batter_side = fetch_handedness(batter, is_batter=True)
+        batter_side = get_handedness_from_parquet(batter, is_batter=True)
         if batter_side is None:
             raise PlayerNotFoundError(batter, "batter")
-        pitcher_arm = fetch_handedness(pitcher, is_batter=False)
+        pitcher_arm = get_handedness_from_parquet(pitcher, is_batter=False)
         if pitcher_arm is None:
             raise PlayerNotFoundError(pitcher, "pitcher")
 
@@ -187,6 +191,7 @@ class InferenceEngine:
                 prev_pitch_group=prev_pitch_group,
                 batter_side=batter_side,
                 pitcher_arm=pitcher_arm,
+                pitcher_family_splits=pitcher_family_splits,
                 prior_states=pa_states,
             )
             pa_states.append(current_state)
@@ -370,12 +375,12 @@ class InferenceEngine:
         prev_pitch_group: str,
         batter_side: str,
         pitcher_arm: str,
+        pitcher_family_splits: Dict[str, float],
         prior_states: Optional[List] = None,
     ) -> Tuple[Dict[str, float], Any]:
         situation = count_situation(balls, strikes)
         pitcher_splits = self.feature_store.get_pitcher_situation_splits(pitcher, situation)
         batter_splits = self.feature_store.get_batter_situation_splits(batter, situation)
-        pitcher_family_splits = self.feature_store.get_pitcher_family_splits(pitcher)
 
         enriched_state = {
             **state_features,
@@ -388,13 +393,9 @@ class InferenceEngine:
             **pitcher_family_splits,
         }
 
-        all_required = set(self.group_artifacts.cat_cols) | set(self.group_artifacts.num_cols)
-        for sub_arts, _ in self.sub_bundles.values():
-            all_required |= set(sub_arts.cat_cols) | set(sub_arts.num_cols)
-
         state = build_pitch_state_from_features(
             pitcher, batter, enriched_state, batter_splits, pitcher_splits,
-            required_cols=list(all_required),
+            required_cols=self._all_required_cols,
         )
 
         seq_states = (prior_states or []) + [state]
@@ -427,11 +428,20 @@ class InferenceEngine:
             if pitches_in_group:
                 active_groups[group_name] = pitches_in_group
 
-        # Re-normalize group probs over active groups
-        total_group_prob = sum(group_dist[g] for g in active_groups)
-        norm_group_dist = {
-            g: group_dist[g] / total_group_prob for g in active_groups
-        } if total_group_prob > 0 else {g: group_dist[g] for g in active_groups}
+        # Re-normalize group probs, penalizing groups whose arsenal coverage is sparse.
+        # weight(g) = P_group(g) * (|arsenal_in_g| / |total_arsenal|)^β
+        total_arsenal_pitches = sum(len(p) for p in active_groups.values())
+        weighted = {
+            g: group_dist[g] * (len(active_groups[g]) / total_arsenal_pitches) ** ARSENAL_COVERAGE_BETA
+            for g in active_groups
+        }
+        total_weighted = sum(weighted.values())
+        norm_group_dist = (
+            {g: w / total_weighted for g, w in weighted.items()}
+            if total_weighted > 0
+            else weighted
+        )
+        logger.debug("  NORM_GROUP_DIST (coverage-adjusted)  %s", norm_group_dist)
 
         final_dist: Dict[str, float] = {}
         for group_name, group_prob in norm_group_dist.items():  # <-- was norm_group_dist
@@ -514,8 +524,11 @@ class InferenceEngine:
         # if p == 1, it is the weighted arithmetic mean
         # if p approaches infinity, it approaches the maximum score among the three
         # if p approaches negative infinity, it approaches the minimum score among the three
-        weighted_sum = (rnn_weight * (rnn_score ** p)) + (out_type_weight * (out_type_score ** p)) 
-        + (run_expectancy_weight * (adj_re_score ** p))
+        weighted_sum = (
+            (rnn_weight * (rnn_score ** p))
+            + (out_type_weight * (out_type_score ** p))
+            + (run_expectancy_weight * (adj_re_score ** p))
+        )
         return weighted_sum ** (1/p)
     
     @staticmethod
