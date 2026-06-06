@@ -15,9 +15,13 @@ from rnn_support_models.out_type_model.out_type_inference_helper import (
     predict_pitch_out_type_outcome,
 )
 from model_shared.feature_engineering.pitch_constants import BASE_LABELS
-from model_shared.optimal_out_handler import get_optimal_out
+from model_shared.optimal_out_handler import (
+    OptimalOutContext,
+    get_optimal_out_from_context,
+)
 from model_shared.location_helper import (
-    precompute_location_context,
+    GlobalLocationContext,
+    pair_location_context,
     get_optimal_location_from_context,
     BUCKET_TO_ZONE,
     FALLBACK_LOCATION,
@@ -33,11 +37,9 @@ COMPOSITE_CONFIG = {
     "run_expectancy_weight": 1
 }
 
-# Controls how much arsenal coverage penalizes sparse groups.
-# 0 = no penalty (current behavior); 1 = full linear penalty; 0.5 is a good starting point.
-ARSENAL_COVERAGE_BETA = 0.5
+Strategy = Literal["argmax", "sample", "optimal_out", "preferred"]
 
-Strategy = Literal["argmax", "sample", "optimal_out"]
+VALID_OUT_TYPES = ("strikeout", "groundout", "flyout")
 
 PA_OUTCOMES = ("walk", "strikeout", "groundout", "flyout", "hard_hit_flyball", "in_progress")
 
@@ -85,12 +87,22 @@ class InferenceEngine:
     plate-appearance simulation loop. Construct once in ``create_app``.
     """
 
-    def __init__(self, group_artifacts, group_rnn, sub_bundles: Dict[str, Tuple], feature_store: FeatureStore) -> None:
+    def __init__(
+        self,
+        group_artifacts,
+        group_rnn,
+        sub_bundles: Dict[str, Tuple],
+        feature_store: FeatureStore,
+        optimal_out_ctx: OptimalOutContext,
+        location_ctx: GlobalLocationContext,
+    ) -> None:
 
         self.group_artifacts = group_artifacts
         self.group_rnn = group_rnn
         self.sub_bundles = sub_bundles  # {"fastball": (arts, rnn), "offspeed": ..., "breaking": ...}
         self.feature_store = feature_store
+        self.optimal_out_ctx = optimal_out_ctx
+        self.location_ctx = location_ctx
 
         re288_path = Path(__file__).resolve().parent / "re288.json"
         with open(re288_path, "r") as f:
@@ -121,6 +133,7 @@ class InferenceEngine:
         strategy: Strategy = "argmax",
         max_pitches: int = 12,
         rng: Optional[np.random.Generator] = None,
+        preferred_out_type: Optional[str] = None,
     ) -> SimulationResult:
         if strategy == "sample" and rng is None:
             rng = np.random.default_rng()
@@ -141,17 +154,31 @@ class InferenceEngine:
         outcome: Optional[str] = None
         pa_states: List = []
 
-        optimal_out = get_optimal_out(pitcher, batter, state_features)
-        optimal_out_type = max(optimal_out, key=optimal_out.get)  # "strikeout", "groundout", or "flyout"
-        loc_context = precompute_location_context(pitcher, batter)
-        pitcher_family_splits = self.feature_store.get_pitcher_family_splits(pitcher)
-        logger.debug(
-            "\n--- OPTIMAL_OUT ---\n"
-            "  pitcher=%s  batter=%s\n"
-            "  scores=%s\n"
-            "  target=%s\n",
-            pitcher, batter, optimal_out, optimal_out_type,
-        )
+        if strategy == "preferred":
+            if preferred_out_type not in VALID_OUT_TYPES:
+                raise ValueError(
+                    f"preferred_out_type must be one of {VALID_OUT_TYPES}, got {preferred_out_type!r}"
+                )
+            optimal_out = {ot: (1.0 if ot == preferred_out_type else 0.0) for ot in VALID_OUT_TYPES}
+            optimal_out_type = preferred_out_type
+            logger.debug(
+                "\n--- PREFERRED_OUT ---\n"
+                "  pitcher=%s  batter=%s  preferred=%s\n",
+                pitcher, batter, preferred_out_type,
+            )
+        else:
+            optimal_out = get_optimal_out_from_context(
+                self.optimal_out_ctx, pitcher, batter, state_features
+            )
+            optimal_out_type = max(optimal_out, key=optimal_out.get)  # "strikeout", "groundout", or "flyout"
+            logger.debug(
+                "\n--- OPTIMAL_OUT ---\n"
+                "  pitcher=%s  batter=%s\n"
+                "  scores=%s\n"
+                "  target=%s\n",
+                pitcher, batter, optimal_out, optimal_out_type,
+            )
+        loc_context = pair_location_context(self.location_ctx, pitcher, batter)
 
         for pitch_idx in range(1, max_pitches + 1):
             rnn_pitch_probs, current_state = self._predict_next_pitch(
@@ -202,7 +229,7 @@ class InferenceEngine:
             for candidate_pitch, rnn_score in rnn_pitch_probs.items():
                 candidate_location = get_optimal_location_from_context(
                     loc_context, candidate_pitch, current_state,
-                    optimal_out_type if strategy == "optimal_out" else None,
+                    optimal_out_type if strategy in ("optimal_out", "preferred") else None,
                 )
                 candidate_zone = BUCKET_TO_ZONE[candidate_location]
 
@@ -376,7 +403,7 @@ class InferenceEngine:
 
         x_cat, x_num, seq_len = build_tensors(seq_states, self.group_artifacts)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             group_logits = self.group_rnn(x_cat, x_num)
             group_probs = torch.softmax(group_logits, dim=-1)[0]
         last_group_probs = group_probs[seq_len - 1 : seq_len]
@@ -426,7 +453,7 @@ class InferenceEngine:
             else:
                 sub_artifacts, sub_rnn = self.sub_bundles[group_name]
                 sub_x_cat, sub_x_num, sub_seq_len = build_tensors(seq_states, sub_artifacts)
-                with torch.no_grad():
+                with torch.inference_mode():
                     sub_logits = sub_rnn(sub_x_cat, sub_x_num)
                     sub_probs = torch.softmax(sub_logits, dim=-1)[0]
                 last_sub_probs = sub_probs[sub_seq_len - 1 : sub_seq_len]
@@ -510,7 +537,7 @@ class InferenceEngine:
         strategy: Strategy,
         rng: Optional[np.random.Generator],
     ) -> str:
-        if strategy in ("argmax", "optimal_out"):
+        if strategy in ("argmax", "optimal_out", "preferred"):
             return max(probs, key=probs.get)
         if strategy == "sample":
             keys = list(probs)

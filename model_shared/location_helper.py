@@ -32,6 +32,20 @@ class LocationContext:
     RE_MAX: float
 
 
+@dataclass
+class GlobalLocationContext:
+    """Per-process state needed to score any (pitcher, batter) pair. Build
+    once via build_global_location_context(); slice into a per-pair
+    LocationContext via pair_location_context().
+    """
+    pitcher_scaled: pd.DataFrame
+    batter_scaled: pd.DataFrame
+    pt_bucket_stats: pd.DataFrame
+    league_avg: dict
+    re24: dict
+    RE_MAX: float
+
+
 def sort_statcast(df: pd.DataFrame) -> pd.DataFrame:
     df = df[df["game_type"] == 'R']
     df = df[df["pitch_type"] != 'UN']
@@ -335,9 +349,11 @@ def calculate_location_scores(
     return scores
 
 
-def precompute_location_context(pitcher, batter) -> Optional[LocationContext]:
-    """Load the parquet once and build all bucket stats for a pitcher-batter pair.
-    Returns None if either player has no data in the dataset.
+def build_global_location_context() -> GlobalLocationContext:
+    """Build the per-process location context. Heavy: reads the parquet,
+    runs league-wide aggregations, fits MinMaxScalers. Call once at app
+    startup; per-request work then becomes a row lookup via
+    pair_location_context().
     """
     parquet_path = Path(__file__).parent.parent / "data" / "historical_pitches.parquet"
     df = pd.read_parquet(parquet_path)
@@ -365,11 +381,28 @@ def precompute_location_context(pitcher, batter) -> Optional[LocationContext]:
     pitcher_bucket_stats, pt_bucket_stats = _build_pitcher_stats(pitch_df, league_avg)
     batter_scaled, pitcher_scaled = _scale_features(batter_bucket_stats, pitcher_bucket_stats)
 
+    return GlobalLocationContext(
+        pitcher_scaled=pitcher_scaled,
+        batter_scaled=batter_scaled,
+        pt_bucket_stats=pt_bucket_stats,
+        league_avg=league_avg,
+        re24=re24,
+        RE_MAX=RE_MAX,
+    )
+
+
+def pair_location_context(
+    global_ctx: GlobalLocationContext, pitcher, batter
+) -> Optional[LocationContext]:
+    """Per-request slice of the global context. Returns None if either
+    player has no data in the dataset (matching the old precompute_*
+    behavior).
+    """
     pitcher_id = int(pitcher)
     batter_id  = int(batter)
 
-    p_rows = pitcher_scaled[pitcher_scaled['pitcher'] == pitcher_id]
-    b_rows = batter_scaled[batter_scaled['batter']   == batter_id]
+    p_rows = global_ctx.pitcher_scaled[global_ctx.pitcher_scaled['pitcher'] == pitcher_id]
+    b_rows = global_ctx.batter_scaled[global_ctx.batter_scaled['batter']   == batter_id]
 
     if p_rows.empty or b_rows.empty:
         return None
@@ -378,11 +411,26 @@ def precompute_location_context(pitcher, batter) -> Optional[LocationContext]:
         pitcher_row=p_rows.iloc[0],
         batter_row=b_rows.iloc[0],
         pitcher_id=pitcher_id,
-        pt_bucket_stats=pt_bucket_stats,
-        league_avg=league_avg,
-        re24=re24,
-        RE_MAX=RE_MAX,
+        pt_bucket_stats=global_ctx.pt_bucket_stats,
+        league_avg=global_ctx.league_avg,
+        re24=global_ctx.re24,
+        RE_MAX=global_ctx.RE_MAX,
     )
+
+
+_default_global_ctx: Optional[GlobalLocationContext] = None
+
+
+def precompute_location_context(pitcher, batter) -> Optional[LocationContext]:
+    """Backwards-compatible per-pair builder. Builds the global context on
+    first use and caches it for the process. Server code should call
+    build_global_location_context() at startup and pair_location_context()
+    per request instead, to avoid the lazy-build cost on the first request.
+    """
+    global _default_global_ctx
+    if _default_global_ctx is None:
+        _default_global_ctx = build_global_location_context()
+    return pair_location_context(_default_global_ctx, pitcher, batter)
 
 
 def get_optimal_location_from_context(
@@ -414,9 +462,3 @@ def get_optimal_location_from_context(
     )
 
     return max(scores, key=scores.get)
-
-
-def get_optimal_location(pitcher, batter, pitch_type: str, state_features: dict) -> str:
-    """Convenience wrapper — builds context and scores in one call."""
-    context = precompute_location_context(pitcher, batter)
-    return get_optimal_location_from_context(context, pitch_type, state_features)

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 
 from model_shared.parameter_loaders import (
     latest_parameters_for_specific_model,
@@ -16,11 +20,19 @@ from model_shared.parameter_loaders import (
     load_vocabs_from_json,
 )
 from model_shared.rnn_definition import PitchRNN
+from model_shared.optimal_out_handler import build_optimal_out_context
+from model_shared.location_helper import build_global_location_context
 
+from .dto import (
+    BatchPredictRequest,
+    BatchPredictResponse,
+    PredictRequest,
+    PredictResponse,
+)
+from .util.request_handler import RequestHandler
 from .util.feature_store import FeatureStore, ParquetHistoricalPitchesFeatureStore
 from .util.inference_engine import (
     InferenceEngine,
-    PitchStep,
     PlayerNotFoundError,
     SimulationResult,
     Strategy,
@@ -29,19 +41,6 @@ from .util.pitch_state_builder import MissingFeaturesError
 
 
 logger = logging.getLogger(__name__)
-
-
-REQUIRED_STATE_KEYS = [
-    "balls",
-    "strikes",
-    "outs_when_up",
-    "inning",
-    "inning_topbot",
-    "bat_score_diff",
-    "on_1b",
-    "on_2b",
-    "on_3b",
-]
 
 
 class Artifacts:
@@ -71,55 +70,6 @@ class Artifacts:
         return max([0] + [int(v) for v in self.y_vocab.values()]) + 1
 
 
-class PredictRequest(BaseModel):
-    pitcher: str = Field(..., min_length=1)
-    batter: str = Field(..., min_length=1)
-    year: int
-    state_features: Dict[str, Any] = Field(default_factory=dict)
-    strategy: Strategy = "argmax"
-    max_pitches: int = Field(default=12, ge=1, le=30)
-
-
-class PredictedPitch(BaseModel):
-    pitch_index: int
-    pitch_type: str
-    rnn_pitch_probs: Dict[str, float]
-    p_strike: float
-    p_ball: float
-    out_type_probs: Dict[str, float]
-    transition_event: str
-    out_type_event: str
-    balls_after: int
-    strikes_after: int
-    terminal: bool
-    outcome: Optional[str] = None
-    target_location: Optional[str] = None
-
-
-class PredictResponse(BaseModel):
-    outcome: Literal["walk", "strikeout", "groundout", "flyout", "hard_hit_flyball", "in_progress"]
-    pitch_count: int
-    sequence: List[PredictedPitch]
-
-
-def _step_to_payload(step: PitchStep) -> PredictedPitch:
-    return PredictedPitch(
-        pitch_index=step.pitch_index,
-        pitch_type=step.pitch_type,
-        rnn_pitch_probs=step.rnn_pitch_probs,
-        p_strike=step.p_strike,
-        p_ball=step.p_ball,
-        out_type_probs=step.out_type_probs,
-        transition_event=step.transition_event,
-        out_type_event=step.out_type_event,
-        balls_after=step.balls_after,
-        strikes_after=step.strikes_after,
-        terminal=step.terminal,
-        outcome=step.outcome,
-        target_location=step.target_location,
-    )
-
-
 def _load_model_bundle(config_path: Path, model_type: str) -> Tuple[Artifacts, PitchRNN]:
     vocab_path = latest_vocab_json_for_specific_model(model_type)
     param_path = latest_parameters_for_specific_model(model_type)
@@ -144,7 +94,10 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    app = FastAPI(title="Pitch RNN Inference API")
+    # Pin torch intra/inter-op threads to 1 so concurrent inference workers
+    # don't fight over cores; concurrency comes from the executor below.
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
 
     config_path = Path(__file__).resolve().parent / "model_config.json"
     if not config_path.exists():
@@ -159,27 +112,55 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
         "breaking": _load_model_bundle(config_path, "breaking"),
     }
 
+    # cache parquet fetch 
+    t0 = time.perf_counter()
+    optimal_out_ctx = build_optimal_out_context()
+    logger.info("optimal_out context built in %.2fs", time.perf_counter() - t0)
+    t0 = time.perf_counter()
+    location_ctx = build_global_location_context()
+    logger.info("location context built in %.2fs", time.perf_counter() - t0)
+
     store: FeatureStore = feature_store or ParquetHistoricalPitchesFeatureStore()
     engine = InferenceEngine(
         group_artifacts=group_artifacts,
         group_rnn=group_rnn,
         sub_bundles=sub_bundles,
         feature_store=store,
+        optimal_out_ctx=optimal_out_ctx,
+        location_ctx=location_ctx,
     )
+    handler = RequestHandler(engine)
+
+    workers = int(os.getenv("MODEL_SERVER_WORKERS", "0")) or min(4, (os.cpu_count() or 1))
+    logger.info("inference executor: max_workers=%d", workers)
+    inference_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="pitch-inference")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            inference_executor.shutdown(wait=True)
+
+    app = FastAPI(title="Pitch RNN Inference API", lifespan=lifespan)
 
     @app.get("/health")
     def health() -> Dict[str, str]:
         return {"status": "ok"}
 
+    
     @app.post("/predict", response_model=PredictResponse)
-    def predict(req: PredictRequest) -> PredictResponse:
+    async def predict(req: PredictRequest) -> PredictResponse:
+        """
+        Primary endpoint that exposes the model to server clients. 
+        """
         start = time.perf_counter()
         logger.info(
             "predict request: pitcher=%s batter=%s year=%s strategy=%s max_pitches=%s",
             req.pitcher, req.batter, req.year, req.strategy, req.max_pitches,
         )
 
-        missing = [k for k in REQUIRED_STATE_KEYS if k not in req.state_features]
+        missing = handler.validate_state(req.state_features)
         if missing:
             raise HTTPException(
                 status_code=422,
@@ -189,14 +170,14 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
+        # resolve the strategy from the request, field can be null which defaults to optimal strategy 
+        strategy, pref = handler.resolve_strategy(req)
+
+        # async call to push simulation computations thread queue 
+        loop = asyncio.get_running_loop()
         try:
-            result: SimulationResult = engine.simulate_plate_appearance(
-                pitcher=req.pitcher,
-                batter=req.batter,
-                year=req.year,
-                state_features=req.state_features,
-                strategy=req.strategy,
-                max_pitches=req.max_pitches,
+            result: SimulationResult = await loop.run_in_executor(
+                inference_executor, partial(handler.run_simulation, req, strategy, pref)
             )
         except PlayerNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -209,15 +190,66 @@ def create_app(feature_store: Optional[FeatureStore] = None) -> FastAPI:
                 },
             )
 
-        response = PredictResponse(
-            outcome=result.outcome,
-            pitch_count=result.pitch_count,
-            sequence=[_step_to_payload(step) for step in result.sequence],
-        )
+        response = handler.result_to_response(result)
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.info(
             "predict response: pitcher=%s batter=%s outcome=%s pitch_count=%d elapsed_ms=%.2f",
             req.pitcher, req.batter, result.outcome, result.pitch_count, elapsed_ms,
+        )
+        return response
+
+    # unused batch request endpoint that might work if we had more hardware 
+    @app.post("/predict/batch", response_model=BatchPredictResponse)
+    async def predict_batch(req: BatchPredictRequest) -> BatchPredictResponse:
+        start = time.perf_counter()
+        logger.info("predict_batch request: size=%d", len(req.requests))
+
+        prepared: List[Tuple[PredictRequest, Strategy, Optional[str]]] = []
+        for i, item in enumerate(req.requests):
+            missing = handler.validate_state(item.state_features)
+            if missing:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "failed_index": i,
+                        "missing_features": missing,
+                        "message": "state_features is missing required keys.",
+                    },
+                )
+            strategy, pref = handler.resolve_strategy(item, failed_index=i)
+            prepared.append((item, strategy, pref))
+
+        loop = asyncio.get_running_loop()
+        try:
+            results: List[SimulationResult] = await loop.run_in_executor(
+                inference_executor, partial(handler.run_batch, prepared)
+            )
+        except PlayerNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "failed_index": getattr(exc, "failed_index", None),
+                    "message": str(exc),
+                },
+            )
+        except MissingFeaturesError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "failed_index": getattr(exc, "failed_index", None),
+                    "missing_features": exc.missing,
+                    "message": "Request is missing features required by the loaded model.",
+                },
+            )
+
+        response = handler.results_to_batch_response(results)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        outcomes: Dict[str, int] = {}
+        for r in results:
+            outcomes[r.outcome] = outcomes.get(r.outcome, 0) + 1
+        logger.info(
+            "predict_batch response: size=%d outcomes=%s elapsed_ms=%.2f",
+            len(results), outcomes, elapsed_ms,
         )
         return response
 
