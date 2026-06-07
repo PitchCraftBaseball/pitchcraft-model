@@ -1,7 +1,5 @@
 # pitchcraft-model
 
-Placeholder README for the Pitchcraft model
-
 ## Setup
 
 To get started with development, follow these steps:
